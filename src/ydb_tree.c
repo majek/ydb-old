@@ -60,7 +60,7 @@ uint refcnt_get(struct tree *tree, int logno) {
 	return (uint)rarr_get(tree->refcnt, logno);
 }
 
-int tree_open(struct tree *tree, char *fname, int *last_record_logno, u64 *last_record_offset) {
+int tree_open(struct tree *tree, char *fname, int *last_record_logno, u64 *last_record_offset, int flags) {
 	char buf[256];
 	
 	tree->fname = strdup(fname);
@@ -73,7 +73,7 @@ int tree_open(struct tree *tree, char *fname, int *last_record_logno, u64 *last_
 
 	tree->root = RB_ROOT;
 	
-	return tree_load_index(tree, last_record_logno, last_record_offset);
+	return tree_load_index(tree, last_record_logno, last_record_offset, flags);
 }
 
 void tree_close(struct tree *tree) {
@@ -219,17 +219,17 @@ int tree_save_index(struct tree *tree) {
 	/* we delete the previous contents! */
 	int fd = open(tree->fname_new,  O_RDWR|O_TRUNC|O_APPEND|O_CREAT, S_IRUSR|S_IWUSR);
 	if(fd < 0) {
-		perror("open()");
+		log_perror("open()");
 		return(-1);
 	}
 	if(ftruncate(fd, file_size) < 0) {
-		perror("ftrunctate()");
+		log_perror("ftrunctate()");
 		goto error_close;
 	}
 	
 	char *mmap_ptr = mmap(NULL, file_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
 	if(mmap_ptr == MAP_FAILED) {
-		perror("mmap()");
+		log_perror("mmap()");
 		goto error_close;
 	}
 	char *buf = mmap_ptr;
@@ -266,23 +266,23 @@ int tree_save_index(struct tree *tree) {
 
 	u64 written_bytes = buf - mmap_ptr; /* actually written */
 	if(ftruncate(fd, written_bytes) < 0) {
-		perror("ftrunctate()");
+		log_perror("ftrunctate()");
 		goto error_close;
 	}
 	
 	if(msync(mmap_ptr, written_bytes, MS_SYNC) != 0) {
-		perror("msync()");
+		log_perror("msync()");
 		goto error_unmap;
 	}
 	if(munmap(mmap_ptr, file_size) < 0)
-		perror("munmap()");
+		log_perror("munmap()");
 	
 	if(fsync(fd) < 0) {
-		perror("fsync()");
+		log_perror("fsync()");
 		goto error_close;
 	}
 	if(close(fd) < 0) {
-		perror("close()");
+		log_perror("close()");
 		return(-1);
 	}
 	/* no resources left to be closed */
@@ -295,7 +295,7 @@ int tree_save_index(struct tree *tree) {
 	
 	/* this is pretty important */
 	if(rename(tree->fname_new, tree->fname) < 0) {
-		perror("rename()");
+		log_perror("rename()");
 		return(-1);
 	}
 
@@ -305,20 +305,22 @@ int tree_save_index(struct tree *tree) {
 
 error_unmap:
 	if(munmap(mmap_ptr, file_size) < 0)
-		perror("munmap()");
+		log_perror("munmap()");
 error_close:
 	close(fd);
 	return(-1);
 }
 
 
-int tree_load_index(struct tree *tree, int *last_record_logno, u64 *last_record_offset) {
+int tree_load_index(struct tree *tree, int *last_record_logno, u64 *last_record_offset, int flags) {
 	char *reason = "unknown";
 	log_info("Loading index %s", tree->fname);
 
 	int fd = open(tree->fname, O_RDONLY|O_LARGEFILE|O_NOATIME);
 	if(fd < 0) {
-		perror("open()");
+		/* don't shout */
+		if(flags & YDB_CREAT) return(-1);
+		log_perror("open()");
 		return(-1);
 	}
 	u64 file_size;
@@ -328,7 +330,7 @@ int tree_load_index(struct tree *tree, int *last_record_logno, u64 *last_record_
 	/* we're setting checksum to zero, unfortunatelly, so need of PROT_WRITE */
 	char *mmap_ptr = mmap(NULL, file_size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
 	if(mmap_ptr == MAP_FAILED) {
-		perror("mmap()");
+		log_perror("mmap()");
 		reason = "mmap failed";
 		goto error_unmap;
 	}
@@ -375,12 +377,12 @@ int tree_load_index(struct tree *tree, int *last_record_logno, u64 *last_record_
 	}
 
 	if(munmap(mmap_ptr, file_size) < 0)
-		perror("munmap()");
+		log_perror("munmap()");
 	return(1);
 
 error_unmap:
 	if(munmap(mmap_ptr, file_size) < 0)
-		perror("munmap()");
+		log_perror("munmap()");
 error_close:
 	close(fd);
 	log_error("Error loading index %s: %s, offet:%i", tree->fname, reason, buf-mmap_ptr);

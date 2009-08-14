@@ -2,10 +2,14 @@
  * warn when creating/removing log files
  * warn when reading/dumping index 
  * error handling
- * logi z dziura w srodku  aaaa_____ddddbbbcccc
+ * db with deletes in the middle  aaaa_____ddddbbbcccc
  * 0-length keys add/del/update
  * milion records use hge ram. after deleting ram usage should drop
  + valgrind
  * check if dir exists at all
 
  * support interface dbm
+ * compilation without pthreads
+ * online disable/enable gc
+
+

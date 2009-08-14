@@ -58,9 +58,9 @@ todo:
 	@echo "\n [*] asserts:"
 	@grep assert *c -n --color=yes|egrep -v "#include"  || true
 	@echo " [*] prints:"
-	@egrep "(\t|[ ]|f)printf" *c -ni --color=yes || true
+	@egrep "[[:space:]]f?printf" *c -ni --color=yes || true
 	@echo "\n [*] perrors:"
-	@grep perror *c -ni --color=yes || true
+	@egrep "[[:space:]]perror" *c -ni --color=yes || true
 	@echo "\n [*] todo:"
 	@grep todo *c -ni --color=yes || true
 

@@ -10,9 +10,15 @@
 /* A database structure. */
 typedef void *YDB;
 
+#define YDB_CREAT	(0x01)
+#define YDB_RDONLY	(0x02)
+#define YDB_GCDISABLE	(0x04)
+
 /* Open a database from a specified directory, or create a new one. */
 YDB ydb_open(char *directory,
-	     int overcommit_factor, unsigned long long max_file_size);
+	     int overcommit_factor,
+	     unsigned long long max_file_size,
+	     int flags);
 
 /* Make sure everything needed is flushed to disk. */
 void ydb_sync(YDB ydb);

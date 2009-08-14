@@ -24,7 +24,7 @@
 #define O_NOATIME 0
 #endif
 
-#define NO_THREADS
+//#define NO_THREADS
 
 /*
 if(!db->flusher_pid && db->tree.used_bytes * db->overcommit_factor > db->llist.total_bytes)
@@ -41,7 +41,7 @@ void gc_spawn(struct db *db) {
 
 #ifndef NO_THREADS
 	if(pthread_create(&db->gc_thread, NULL, gc_run_thread, db) != 0) {
-		perror("pthread_create()");
+		log_perror("pthread_create()");
 		return;
 	}
 #else
@@ -54,7 +54,7 @@ void gc_join(struct db *db) {
 		return;
 #ifndef NO_THREADS
 	if (pthread_join(db->gc_thread, NULL) != 0) {
-		perror("pthread_join()");
+		log_perror("pthread_join()");
 	}
 #endif
 	db->gc_running = 0;
@@ -77,6 +77,7 @@ static int gc_item_move(struct db *db, char *key, u16 key_sz, int logno, u64 val
 		goto release;
 	/* not detelted, not updated. we need to move it */
 	// 1. get the value
+	log_info("gc_get");
 	int value_sz = loglist_get(&db->loglist, item->logno, item->value_offset, item->value_sz, value, sizeof(value));
 	if(value_sz < 0)
 		goto release;
@@ -103,8 +104,8 @@ void *gc_run_thread(void *vdb) {
 	
 	int fd = open(db->tree.fname, O_RDONLY|O_LARGEFILE|O_NOATIME);
 	if(fd < 0) {
-		perror("open()");
-		/* TODO: file can legally not exist */
+		db_info("GC thread stopped. No index file found %s", db->tree.fname);
+		/* Index file can legally not exist, just go on. */
 		return((void*)-1);
 	}
 	u64 file_size;
@@ -113,7 +114,7 @@ void *gc_run_thread(void *vdb) {
 	
 	char *mmap_ptr = mmap(NULL, file_size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
 	if(mmap_ptr == MAP_FAILED) {
-		perror("mmap()");
+		log_perror("mmap()");
 		goto error_close;
 	}
 	
@@ -155,7 +156,7 @@ void *gc_run_thread(void *vdb) {
 	}
 
 	if(munmap(mmap_ptr, file_size) < 0)
-		perror("munmap()");
+		log_perror("munmap()");
 	close(fd);
 	db_info("Finished GC thread, success, items/moved %i/%i", counter, ok_counter);
 #ifndef NO_THREADS
@@ -169,7 +170,7 @@ void *gc_run_thread(void *vdb) {
 
 error_unmap:
 	if(munmap(mmap_ptr, file_size) < 0)
-		perror("munmap()");
+		log_perror("munmap()");
 error_close:
 	close(fd);
 	db_info("Finished GC thread, error");

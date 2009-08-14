@@ -2,7 +2,7 @@ import ctypes
 import os
 
 LIBNAME="libydb.so"
-PATHS=[".", "..", "../src/"]
+PATHS=[".", "..", "../src/", "./src"]
 
 for path in PATHS:
     path = os.path.join(path, LIBNAME)
@@ -10,14 +10,19 @@ for path in PATHS:
         LIBPATH=path
         break
 else:
-    raise 
+    raise Exception("libydb.so not found!")
+
+
+YDB_CREAT=0x01
+YDB_RDONLY=0x02
+YDB_GCDISABLE=0x04
 
 
 def create_lib_instance(libfname):
     YDB = ctypes.c_void_p
 
     libydb = ctypes.cdll.LoadLibrary(libfname)
-    libydb.ydb_open.argtypes= [ctypes.c_char_p, ctypes.c_int, ctypes.c_ulonglong]
+    libydb.ydb_open.argtypes= [ctypes.c_char_p, ctypes.c_int, ctypes.c_ulonglong, ctypes.c_int]
     libydb.ydb_open.restype = YDB
 
     libydb.ydb_sync.argtypes=[YDB]
@@ -41,7 +46,7 @@ libydb = create_lib_instance(LIBPATH)
 
 class YDB:
     def __init__(self, directory, overcommit_factor=3, max_file_size=1*1024*1024*1024):
-        self.ydb = libydb.ydb_open(directory, overcommit_factor, max_file_size)
+        self.ydb = libydb.ydb_open(directory, overcommit_factor, max_file_size, YDB_CREAT)
         assert self.ydb
         self.buf = ctypes.create_string_buffer(16*1024*1024)
 

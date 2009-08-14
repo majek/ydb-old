@@ -45,7 +45,7 @@ class TestIndex(utils.YdbTest):
             ydb.delete(key)
 
 
-        self.assertEqual(0, 1)
+        #self.assertEqual(0, 1)
 
 
 if __name__ == '__main__':

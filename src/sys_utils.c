@@ -3,10 +3,14 @@
 #include "ydb_internal.h"
 
 
-#include <stdio.h> // snprintf, rename
-#include <sys/time.h> // getrlimit
-#include <sys/resource.h> // getrlimit
-#include <unistd.h> // pread
+#include <stdio.h>
+
+// getrlimit
+#include <sys/time.h>
+#include <sys/resource.h>
+
+// pread
+#include <unistd.h>
 #include <errno.h>
 
 // stat
@@ -17,7 +21,7 @@ int safe_unlink(const char *old_path) {
 	char new_path[256];
 	snprintf(new_path, sizeof(new_path), "%s~", old_path);
 	if(rename(old_path, new_path) != 0) {
-		perror("rename()");
+		log_perror("rename()");
 		return(-1);
 	}
 	return(0);
@@ -43,7 +47,7 @@ int writeall(int fd, void *sbuf, size_t count) {
 		if(errno == EINTR)
 			continue;
 		if(r < 0) {
-			perror("write()");
+			log_perror("write()");
 			return(r);
 		}
 		pos += r;
@@ -62,7 +66,7 @@ int preadall(int fd, void *sbuf, size_t count, size_t offset) {
 			return(-1);
 		}
 		if(r < 0) {
-			perror("pread()");
+			log_perror("pread()");
 			return(-1);
 		}
 		pos += r;
@@ -88,7 +92,7 @@ u32 adler32(void *sdata, size_t len) {
 int get_fd_size(int fd, u64 *size) {
 	struct stat st;
 	if(fstat(fd, &st) != 0){
-		perror("stat()");
+		log_perror("stat()");
 		return(-1);
 	}
 	if(size)

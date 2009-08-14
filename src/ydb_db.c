@@ -12,30 +12,38 @@ static void db_close(struct db *db, int save_index);
 
 
 YDB ydb_open(char *top_dir,
-	     int overcommit_ratio, unsigned long long max_file_size) {
+	     int overcommit_ratio,
+	     unsigned long long max_file_size,
+	     int flags) {
 
-	// 8MiB minimal limit
+	log_info(" **** ");
+	log_info("ydb_open(%s, %i, %llu, 0x%x)", top_dir, overcommit_ratio, max_file_size, flags);
+
+	/* no minimal limit, but warn */
 	if(max_file_size < (MAX_RECORD_SIZE))
-		return(NULL);
+		log_warn("max_file_size is low, think again! %llu < %i", max_file_size, MAX_RECORD_SIZE);
 	// 2GiB maximum for 32-bit platform, we're mmaping the file on load
-	if(sizeof(char*) == 4 && max_file_size > (2<<30))
-		return(NULL);
+	if(sizeof(char*) == 4 && max_file_size >= (1<<31))
+		log_warn("max_file_size is greater than 1<<31 on 32 bits machine. That's brave.");
 	
 	struct db *db = (struct db *)zmalloc(sizeof(struct db));
 	db->magic = YDB_STRUCT_MAGIC;
 	db->top_dir = strdup(top_dir);
 	db->overcommit_ratio = overcommit_ratio;
 	db->lock = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+	db->flags = flags;
 	
 	char buf[256];
 	snprintf(buf, sizeof(buf), "%s%s%s", top_dir, PATH_DELIMITER, "index.ydb");
 	
 	int logno = 0;
 	u64 record_offset = 0;
-	if(tree_open(&db->tree, buf, &logno, &record_offset) < 0) {
-		log_error("Failed to load index file from %s", top_dir);
-		/* TODO: memleaks here */
-		//return(NULL);
+	if(tree_open(&db->tree, buf, &logno, &record_offset, flags) < 0) {
+		if(!(flags & YDB_CREAT)) {
+			log_error("Failed to load index file from %s", top_dir);
+			/* TODO: memleaks here */
+			return(NULL);
+		}
 	}
 	
 	int r = loglist_open(&db->loglist, top_dir, max_file_size, max_descriptors());
@@ -150,6 +158,8 @@ void ydb_close(YDB ydb) {
 	assert(db->magic == YDB_STRUCT_MAGIC);
 	
 	db_close(db, 1);
+	log_info("ydb_close");
+	log_info(" **** ");
 }
 
 static void db_close(struct db *db, int save_index) {
@@ -159,7 +169,7 @@ static void db_close(struct db *db, int save_index) {
 	/* no need to lock, as the thread doesn't exist */
 	
 	if(fsync(db->loglist.write_fd) < 0)
-		perror("fsync()");
+		log_perror("fsync()");
 
 	double ratio = DOUBLE_RATIO(db, 999.0);
 
@@ -179,7 +189,7 @@ void ydb_sync(YDB ydb) {
 	assert(db->magic == YDB_STRUCT_MAGIC);
 	DB_LOCK(db);
 	if(fsync(db->loglist.write_fd) < 0)
-		perror("fsync()");
+		log_perror("fsync()");
 	DB_UNLOCK(db);
 }
 
@@ -269,7 +279,5 @@ error:
 	DB_UNLOCK(db);
 	return(-1);
 }
-
-
 
 

@@ -28,15 +28,20 @@ static inline char *safe_strncpy(char *dst, const char *src, size_t n) {
 
 
 
-#define log_debug(format, ...) ydb_log(__FILE__, "DEBUG", NULL, format, ##__VA_ARGS__)
-#define log_info(format, ...)  ydb_log(__FILE__, "INFO",  NULL, format, ##__VA_ARGS__)
-#define log_warn(format, ...)  ydb_log(__FILE__, "WARN",  NULL, format, ##__VA_ARGS__)
-#define log_error(format, ...) ydb_log(__FILE__, "ERROR", NULL, format, ##__VA_ARGS__)
+#define log_debug(format, ...) ydb_log(__FILE__, __LINE__, "DEBUG", NULL, format, ##__VA_ARGS__)
+#define log_info(format, ...)  ydb_log(__FILE__, __LINE__, "INFO",  NULL, format, ##__VA_ARGS__)
+#define log_warn(format, ...)  ydb_log(__FILE__, __LINE__, "WARN",  NULL, format, ##__VA_ARGS__)
+#define log_error(format, ...) ydb_log(__FILE__, __LINE__, "ERROR", NULL, format, ##__VA_ARGS__)
 
-#define db_debug(format, ...) ydb_log(__FILE__, "DEBUG", db, format, ##__VA_ARGS__)
-#define db_info(format, ...)  ydb_log(__FILE__, "INFO",  db, format, ##__VA_ARGS__)
-#define db_warn(format, ...)  ydb_log(__FILE__, "WARN",  db, format, ##__VA_ARGS__)
-#define db_error(format, ...) ydb_log(__FILE__, "ERROR", db, format, ##__VA_ARGS__)
+#define db_debug(format, ...) ydb_log(__FILE__, __LINE__, "DEBUG", db, format, ##__VA_ARGS__)
+#define db_info(format, ...)  ydb_log(__FILE__, __LINE__, "INFO",  db, format, ##__VA_ARGS__)
+#define db_warn(format, ...)  ydb_log(__FILE__, __LINE__, "WARN",  db, format, ##__VA_ARGS__)
+#define db_error(format, ...) ydb_log(__FILE__, __LINE__, "ERROR", db, format, ##__VA_ARGS__)
 
-void ydb_log(char *file, char *type, void *ptr, const char *fmt, ...);
+void ydb_log(char *file, int line, char *type, void *ptr, const char *fmt, ...);
+
+
+#define log_perror(format, ...) ydb_log_perror(__FILE__, __LINE__, format, ##__VA_ARGS__)
+void ydb_log_perror(char *file, int line, const char *fmt, ...);
+
 

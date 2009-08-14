@@ -112,7 +112,7 @@ struct index_item{
 	char	key[];
 };
 
-int tree_load_index(struct tree *tree, int *last_record_logno, u64 *last_record_offset);
+int tree_load_index(struct tree *tree, int *last_record_logno, u64 *last_record_offset, int flags);
 int tree_save_index(struct tree *tree);
 
 
@@ -135,7 +135,7 @@ struct tree_sig{
 	int logno;
 	u64 record_offset;
 };
-int tree_open(struct tree *tree, char *fname, int *last_record_logno, u64 *last_record_offset);
+int tree_open(struct tree *tree, char *fname, int *last_record_logno, u64 *last_record_offset, int flags);
 void tree_close(struct tree *tree);
 
 unsigned int refcnt_get(struct tree *tree, int logno);
@@ -204,7 +204,9 @@ struct db {
 	struct loglist	loglist;
 
 	int overcommit_ratio;
+	int flags;
 	
+	int gc_enabled;
 	int gc_running;
 	int gc_finished;
 	pthread_t gc_thread;

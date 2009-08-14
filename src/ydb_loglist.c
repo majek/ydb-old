@@ -62,13 +62,13 @@ char *log_filename(char *top_dir, int logno) {
 static void touch_file(char *fname) {
 	int fd = open(fname,  O_WRONLY|O_APPEND|O_CREAT, S_IRUSR|S_IWUSR);
 	if(fd < 0) {
-		perror("open()");
+		log_perror("open()");
 		log_error("Can't create file %s!", fname);
 		return;
 	}
 	int r = fsync(fd);
 	if(r < 0)
-		perror("fsync()");
+		log_perror("fsync()");
 	close(fd);
 }
 
@@ -91,7 +91,7 @@ static int log_open_writer(struct loglist *llist, int write_logno) {
 	assert(log);
 	int fd = open(log->fname, O_WRONLY|O_APPEND|O_LARGEFILE);
 	if(fd < 0) {
-		perror("open()");
+		log_perror("open()");
 		return(-1);
 	}
 	llist->write_fd = fd;
@@ -102,12 +102,12 @@ static int log_open_writer(struct loglist *llist, int write_logno) {
 static struct log* log_new(char *fname) {
 	int fd = open(fname, O_RDONLY|O_LARGEFILE|O_NOATIME);
 	if(fd < 0) {
-		perror("open()");
+		log_perror("open()");
 		log_error("Unable to open file %s", fname);
 		return(NULL);
 	}
 	if(flock(fd, LOCK_EX|LOCK_NB) < 0){
-		perror("flock()");
+		log_perror("flock()");
 		log_error("Can't get lock on %s - Other instance running?", fname);
 		close(fd);
 		return(NULL);
@@ -319,7 +319,7 @@ record_error:
 
 static int llist_write_log_rotate(struct loglist *llist) {
 	if(fsync(llist->write_fd))
-		perror("fsync()");
+		log_perror("fsync()");
 
 	log_info("New log created: %i", llist->write_logno+1);
 	if(log_create(llist, llist->write_logno+1) < 0)
@@ -331,7 +331,7 @@ static int llist_write_log_rotate(struct loglist *llist) {
 	
 	// Close only after new was opened with success
 	if(close(previous_fd))
-		perror("close()");
+		log_perror("close()");
 	return(0);
 }
 
@@ -395,10 +395,13 @@ struct append_info loglist_append(struct loglist *llist, char *key, u16 key_sz, 
 	sz = buf_ptr - buf;
 	assert(sz <= MAX_RECORD_SIZE);
 	
-	u64 record_offset = loglist_do_write(llist, buf, sz);
+	int write_logno = llist->write_logno; // write log can be changed here
+	s64 record_offset = loglist_do_write(llist, buf, sz);
+	if(record_offset < 0)
+		abort();
 
 	struct append_info af;
-	af.logno = llist->write_logno;
+	af.logno = write_logno;
 	af.record_offset = record_offset;
 	af.value_offset = record_offset + sizeof(struct ydb_key_record) + ROUND_UP(key_sz, PADDING);
 	return af;
@@ -435,7 +438,7 @@ int loglist_get(struct loglist *llist, int logno,
 	size_t count = ROUND_UP(value_sz, PADDING) + sizeof(struct ydb_value_record);
 	int r = preadall(log->fd, dst, count, value_offset);
 	if(r < 0){
-		log_error("preadall()");
+		log_error("preadall() fd:%i  file:%s  offset:%llu  length:%i", log->fd, log->fname, value_offset, count);
 		return(-1);
 	}
 	if(!is_value_record_valid(dst, value_sz)){

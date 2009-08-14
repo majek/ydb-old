@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <errno.h>
 
 // open
 #include <sys/types.h>
@@ -18,7 +19,7 @@ int ydb_log_fd = -1;
 char ydb_log_file[] = "ydb.log";
 
 
-void ydb_log(char *file, char *type, void *ptr, const char *fmt, ...) {
+void ydb_log(char *file, int line, char *type, void *ptr, const char *fmt, ...) {
 	char buf[1024];
 	va_list ap;
 	va_start(ap, fmt);
@@ -31,6 +32,9 @@ void ydb_log(char *file, char *type, void *ptr, const char *fmt, ...) {
 			return;
 	}
 	
+	char fline[32];
+	snprintf(fline, sizeof(fline), "%s:%i", file, line);
+	
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	
@@ -42,17 +46,17 @@ void ydb_log(char *file, char *type, void *ptr, const char *fmt, ...) {
 	char buf2[1024];
 
 	if(!ptr) {
-		snprintf(buf2, sizeof(buf2), "%s.%03li %-16s %-6s %s\n",
+		snprintf(buf2, sizeof(buf2), "%s.%03li %-18s %-6s %s\n",
 						tb,
 						tv.tv_usec/1000,
-						file,
+						fline,
 						type,
 						buf);
 	} else {
-		snprintf(buf2, sizeof(buf2), "%s.%03li %-16s %-6s %p %s\n",
+		snprintf(buf2, sizeof(buf2), "%s.%03li %-18s %-6s %p %s\n",
 						tb,
 						tv.tv_usec/1000,
-						file,
+						fline,
 						type,
 						ptr,
 						buf);
@@ -61,4 +65,20 @@ void ydb_log(char *file, char *type, void *ptr, const char *fmt, ...) {
 	write(ydb_log_fd, buf2, strlen(buf2));
 	fsync(ydb_log_fd);
 }
+
+void ydb_log_perror(char *file, int line, const char *fmt, ...) {
+	char errno_buf[512];
+	char user_buf[1024];
+	strerror_r(errno, errno_buf, sizeof(errno_buf));
+	errno_buf[sizeof(errno_buf)-1] = '\0';
+	
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(user_buf, sizeof(user_buf), fmt, ap);
+	va_end(ap);
+	
+	ydb_log(file, line, "ERROR", NULL, "%s: %s", user_buf, errno_buf);
+}
+
+
 

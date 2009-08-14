@@ -7,6 +7,9 @@ all:
 
 clean:
 	$(MAKE) -C src clean
+	rm -f tests/*.pyc
+	rm -f test_leak
+	rm -f ydb.log tests/ydb.log tests/.coverage
 
 #strace -fFo /tmp/ydbtest.strace
 test: all
