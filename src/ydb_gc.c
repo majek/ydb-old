@@ -77,7 +77,6 @@ static int gc_item_move(struct db *db, char *key, u16 key_sz, int logno, u64 val
 		goto release;
 	/* not detelted, not updated. we need to move it */
 	// 1. get the value
-	log_info("gc_get");
 	int value_sz = loglist_get(&db->loglist, item->logno, item->value_offset, item->value_sz, value, sizeof(value));
 	if(value_sz < 0)
 		goto release;
@@ -94,12 +93,28 @@ release:
 }
 
 
+static int se_cmp(const void *a, const void *b) {
+	struct index_item *ii_a = (struct index_item *)a;
+	struct index_item *ii_b = (struct index_item *)b;
+	if(ii_a->logno == ii_b->logno){
+		if(ii_a->value_offset == ii_b->value_offset)
+			return(0);
+		if(ii_a->value_offset < ii_b->value_offset)
+			return(-1);
+		return(1);
+	}
+	if(ii_a->logno < ii_b->logno)
+		return(-1);
+	return(1);
+}
+
 /*
 As we can't traverse current tree, becouse of the concurrency, we 
 load previous index file.
 */
 void *gc_run_thread(void *vdb) {
 	struct db *db = (struct db *)vdb;
+	struct timespec a, b;
 	db_info("Starting GC thread");
 	
 	int fd = open(db->tree.fname, O_RDONLY|O_LARGEFILE|O_NOATIME);
@@ -121,13 +136,21 @@ void *gc_run_thread(void *vdb) {
 #ifndef NO_THREADS
 	DB_LOCK(db);
 #endif
-
+/*
 	u64 used_bytes = db->tree.key_bytes + db->tree.value_bytes;
 	u64 bytes_threshold = (double)used_bytes * ((double)db->overcommit_ratio/2.0);
-	int can_have_logs = (bytes_threshold / db->loglist.max_file_size);
+	int can_have_logs = (bytes_threshold / db->loglist.min_log_size);
 	int recent_logno = db->loglist.write_logno - can_have_logs;
 
-	db_info("GC, max_log:%i, recent_log:%i", db->loglist.write_logno, recent_logno);
+	db_info("GC: max_log:%i, recent_log:%i", db->loglist.write_logno, recent_logno);
+*/
+
+	int ocr = db->overcommit_ratio;
+	u64 allowed_bytes = USED_BYTES(db) * ((ocr-1)/2 + 1);
+	s64 to_free_bytes = db->loglist.total_bytes - allowed_bytes;
+	s64 freed_bytes = 0;
+	log_info("GC: allowed_bytes:%lli used_bytes:%lli to_free_bytes:%lli", allowed_bytes, db->loglist.total_bytes, to_free_bytes);
+
 
 #ifndef NO_THREADS
 	DB_UNLOCK(db);
@@ -136,8 +159,22 @@ void *gc_run_thread(void *vdb) {
 	int counter = 0;
 	int ok_counter = 0;
 	
-	char *ptr = mmap_ptr + sizeof(struct index_header);
+	char *ptr = mmap_ptr;
+	struct index_header *ih = (struct index_header *)ptr;
+	if(ih->magic != INDEX_HEADER_MAGIC)
+		goto error_unmap;
+	u32 read_checksum = ih->checksum;
+	ih->checksum = 0;
+	if(read_checksum != adler32(ih, sizeof(struct index_header)))
+		goto error_unmap;
+	u64 items_counter = ih->key_counter;
+	
+	struct index_item **se = (struct index_item **)malloc(sizeof(struct item_index *) * items_counter);
+
+	clock_gettime(CLOCK_MONOTONIC, &a);
+	ptr += sizeof(struct index_header);
 	char *end_ptr = mmap_ptr + file_size;
+	int item_no = 0;
 	while(ptr < end_ptr) {
 		struct index_item *ii = (struct index_item *)ptr;
 		ptr += sizeof(struct index_item) + ROUND_UP(ii->key_sz, PADDING);
@@ -150,10 +187,37 @@ void *gc_run_thread(void *vdb) {
 			goto error_unmap;
 	
 		counter++;
-		if(ii->logno >= recent_logno)
-			continue;
-		ok_counter += gc_item_move(db, ii->key, ii->key_sz, ii->logno, ii->value_offset);
+		//if(ii->logno >= recent_logno)
+		//	continue;
+		
+		se[item_no] = ii;
+		item_no++;
+		if(item_no >= items_counter)
+			break;
 	}
+	clock_gettime(CLOCK_MONOTONIC, &b);
+	log_info("Reading index took %3llims, %i items loaded.", TIMESPEC_SUBTRACT(b, a)/1000000, item_no);
+	
+	clock_gettime(CLOCK_MONOTONIC, &b);
+	qsort(se, item_no, sizeof(struct index_item *), se_cmp);
+	clock_gettime(CLOCK_MONOTONIC, &b);
+	log_info("Sorting took %3llims", TIMESPEC_SUBTRACT(b, a)/1000000);
+	
+	int i;
+	for(i = 0; i < item_no; i++) {
+		struct index_item *ii = se[i];
+		int ok = gc_item_move(db, ii->key, ii->key_sz, ii->logno, ii->value_offset);
+		if(ok) {
+			//log_info("moved key %*s", ii->key_sz, ii->key);
+			ok_counter += ok;
+			freed_bytes +=  KEY_RECORD_SIZE(ii->key_sz) \
+				      + VALUE_RECORD_SIZE(ii->value_sz);
+			if(freed_bytes >= to_free_bytes)
+				break;
+		}
+	}
+	log_info("GC: allowed_bytes:%lli used_bytes:%lli to_free_bytes:%lli", allowed_bytes, db->loglist.total_bytes, to_free_bytes);
+
 
 	if(munmap(mmap_ptr, file_size) < 0)
 		log_perror("munmap()");

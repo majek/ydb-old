@@ -9,7 +9,7 @@ def kv(prefix, chunks):
 
 
 class TestIndex(utils.YdbTest):
-    @utils.provide_ydb(max_file_size=5*1024*1024)
+    @utils.provide_ydb(min_log_size=5*1024*1024)
     def test1(self, ydb):
         chunks = 1000
         for key, value in kv('#1', chunks):
@@ -44,8 +44,6 @@ class TestIndex(utils.YdbTest):
         for key, value in kv('#4', chunks/2):
             ydb.delete(key)
 
-
-        #self.assertEqual(0, 1)
 
 
 if __name__ == '__main__':

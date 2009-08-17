@@ -45,3 +45,11 @@ void ydb_log(char *file, int line, char *type, void *ptr, const char *fmt, ...);
 void ydb_log_perror(char *file, int line, const char *fmt, ...);
 
 
+
+/* Timeval subtraction in microseconds */
+#define TIMEVAL_SUBTRACT(a,b) (((a).tv_sec - (b).tv_sec) * 1000000 + (a).tv_usec - (b).tv_usec)
+#define TIMEVAL_SEC_SUBTRACT(a,b) ((a).tv_sec - (b).tv_sec + (((a).tv_usec < (b).tv_usec) ? - 1 : 0))
+
+#define TIMESPEC_SUBTRACT(a,b) ((long long)((a).tv_sec - (b).tv_sec) * 1000000000LL + (a).tv_nsec - (b).tv_nsec)
+
+

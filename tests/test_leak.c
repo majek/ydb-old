@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
 	
 	char ydb_dir[256];
 	snprintf(ydb_dir, sizeof(ydb_dir),"%s", argv[1]);
-	YDB ydb = ydb_open(ydb_dir, 4, 5*1024*1024);
+	YDB ydb = ydb_open(ydb_dir, 4, 5*1024*1024, YDB_CREAT);
 	
 	snprintf(key, sizeof(key), "xxxx");
 	ydb_add(ydb, key, sizeof(key), value, sizeof(value)/2);
@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
 	ydb_close(ydb);
 	
 	/* reopen */
-	ydb = ydb_open(ydb_dir, 4, 5*1024*1024);
+	ydb = ydb_open(ydb_dir, 4, 5*1024*1024, 0);
 	ydb_add(ydb, key, sizeof(key), value, sizeof(value)/2);
 	ydb_close(ydb);
 	return(0);

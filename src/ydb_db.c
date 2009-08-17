@@ -13,18 +13,18 @@ static void db_close(struct db *db, int save_index);
 
 YDB ydb_open(char *top_dir,
 	     int overcommit_ratio,
-	     unsigned long long max_file_size,
+	     unsigned long long min_log_size,
 	     int flags) {
 
 	log_info(" **** ");
-	log_info("ydb_open(%s, %i, %llu, 0x%x)", top_dir, overcommit_ratio, max_file_size, flags);
+	log_info("ydb_open(%s, %i, %llu, 0x%x)", top_dir, overcommit_ratio, min_log_size, flags);
 
 	/* no minimal limit, but warn */
-	if(max_file_size < (MAX_RECORD_SIZE))
-		log_warn("max_file_size is low, think again! %llu < %i", max_file_size, MAX_RECORD_SIZE);
+	if(min_log_size < (MAX_RECORD_SIZE))
+		log_warn("min_log_size is low, think again! %llu < %i", min_log_size, MAX_RECORD_SIZE);
 	// 2GiB maximum for 32-bit platform, we're mmaping the file on load
-	if(sizeof(char*) == 4 && max_file_size >= (1<<31))
-		log_warn("max_file_size is greater than 1<<31 on 32 bits machine. That's brave.");
+	if(sizeof(char*) == 4 && min_log_size >= (1<<31))
+		log_warn("min_log_size is greater than 1<<31 on 32 bits machine. That's brave.");
 	
 	struct db *db = (struct db *)zmalloc(sizeof(struct db));
 	db->magic = YDB_STRUCT_MAGIC;
@@ -46,7 +46,7 @@ YDB ydb_open(char *top_dir,
 		}
 	}
 	
-	int r = loglist_open(&db->loglist, top_dir, max_file_size, max_descriptors());
+	int r = loglist_open(&db->loglist, top_dir, min_log_size, max_descriptors());
 	if(r < 0){
 		/* TODO: memleaks here */
 		return(NULL);
@@ -144,14 +144,6 @@ int db_unlink_old_logs(struct db *db) {
 	return(counter);
 }
 
-#define USED_BYTES(db)	\
-	(db->tree.key_bytes + db->tree.value_bytes)
-
-/* TODO: two adds instead of one */
-#define DOUBLE_RATIO(db, default)	\
-	(USED_BYTES(db) ? ((double)db->loglist.total_bytes / (double)USED_BYTES(db)) : default)
-#define INT_RATIO(db, default)	\
-	(USED_BYTES(db) ? (db->loglist.total_bytes / USED_BYTES(db)) : default)
 
 void ydb_close(YDB ydb) {
 	struct db *db = (struct db *) ydb;
@@ -171,12 +163,10 @@ static void db_close(struct db *db, int save_index) {
 	if(fsync(db->loglist.write_fd) < 0)
 		log_perror("fsync()");
 
-	double ratio = DOUBLE_RATIO(db, 999.0);
-
 	if(save_index)
 		tree_save_index(&db->tree);
 	log_info("Closing log. %llu/%llu Overcommit ratio:%.2f",
-			USED_BYTES(db), db->loglist.total_bytes, ratio);
+		USED_BYTES(db), db->loglist.total_bytes, DOUBLE_RATIO(db, 999.0));
 	
 	tree_close(&db->tree);
 	loglist_close(&db->loglist);
@@ -208,16 +198,17 @@ int ydb_add(YDB ydb, char *key, unsigned short key_sz,
 	
 	/* written two full log files and no gc running*/
 	if(db->gc_running == 0 && 
-	   (db->loglist.appended_bytes > (db->loglist.max_file_size << 1))) {
+	   (db->loglist.appended_bytes > (db->loglist.min_log_size << 1))) {
 		db_info("Saving index");
 		tree_save_index(&db->tree);
 		db_unlink_old_logs(db);
 	}
 
-	u64 used_bytes = db->tree.key_bytes + db->tree.value_bytes;
+	double ratio = DOUBLE_RATIO(db, 999.0);
+	//log_info("ratio:%.3f/%.3f", ratio, (double)db->overcommit_ratio);
 	if(db->gc_running == 0 && (
 	    /* overcommit threshold is reached */
-	    used_bytes * db->overcommit_ratio > db->loglist.total_bytes)) {
+	    ratio > (double)db->overcommit_ratio)) {
 		gc_spawn(db);
 	}
 	

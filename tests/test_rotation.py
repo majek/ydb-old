@@ -8,7 +8,7 @@ def kv_big(chunks):
         yield key, value
 
 class TestRotation(utils.YdbTest):
-    @utils.provide_ydb(max_file_size=6*1024*1024)
+    @utils.provide_ydb(min_log_size=6*1024*1024)
     def test1(self, ydb):
         chunks = 16
         for key, value in kv_big(chunks):

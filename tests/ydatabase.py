@@ -45,14 +45,17 @@ def create_lib_instance(libfname):
 libydb = create_lib_instance(LIBPATH)
 
 class YDB:
-    def __init__(self, directory, overcommit_factor=3, max_file_size=1*1024*1024*1024):
-        self.ydb = libydb.ydb_open(directory, overcommit_factor, max_file_size, YDB_CREAT)
+    def __init__(self, directory, overcommit_factor=3, min_log_size=1*1024*1024*1024):
+        self.ydb = libydb.ydb_open(directory, overcommit_factor, min_log_size, YDB_CREAT)
         assert self.ydb
         self.buf = ctypes.create_string_buffer(16*1024*1024)
 
     def sync(self):
         assert self.ydb
         libydb.ydb_sync(self.ydb)
+
+    def flush(self, *args, **kwargs):
+        return self.sync(*args, **kwargs)
 
     def close(self):
         assert self.ydb

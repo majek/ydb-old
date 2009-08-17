@@ -240,7 +240,8 @@ int tree_save_index(struct tree *tree) {
 	*ih = (struct index_header) {
 		.magic = INDEX_HEADER_MAGIC,
 		.last_record_logno = tree->last_record_logno,
-		.last_record_offset = tree->last_record_offset
+		.last_record_offset = tree->last_record_offset,
+		.key_counter = tree->key_counter
 	};
 	ih->checksum = adler32(ih, sizeof(struct index_header));
 
@@ -290,7 +291,7 @@ int tree_save_index(struct tree *tree) {
 	/* TODO: check if tree->fname exists */
 	/* TODO: move older indexes to backups :)*/
 	
-	/* ignore error */
+	/* ignore errors */
 	rename(tree->fname, tree->fname_old);
 	
 	/* this is pretty important */

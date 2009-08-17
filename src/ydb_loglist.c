@@ -134,8 +134,8 @@ void log_del(struct log* log) {
 }
 
 
-int loglist_open(struct loglist *llist, char *top_dir, u64 max_file_size, int max_descriptors) {
-	llist->max_file_size = max_file_size;
+int loglist_open(struct loglist *llist, char *top_dir, u64 min_log_size, int max_descriptors) {
+	llist->min_log_size = min_log_size;
 	llist->logs = rarr_new();
 	llist->top_dir = strdup(top_dir);
 		
@@ -351,7 +351,7 @@ static s64 loglist_do_write(struct loglist *llist, char *buf, int buf_sz) {
 	llist->total_bytes += buf_sz;
 	llist->appended_bytes += buf_sz;
 	
-	if(log->file_size > llist->max_file_size) {
+	if(log->file_size > llist->min_log_size) {
 		if(llist_write_log_rotate(llist) < 0)
 			log_error("Unable to write to new log!");
 	}

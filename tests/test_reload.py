@@ -1,7 +1,7 @@
 import utils
 
 class TestReload(utils.YdbTest):
-    @utils.provide_ydb(max_file_size=6*1024*1024)
+    @utils.provide_ydb(min_log_size=6*1024*1024)
     def test1(self, ydb):
         key1 = 'a'
         key2 = 'b'
@@ -17,7 +17,7 @@ class TestReload(utils.YdbTest):
         self.assertEqual(ydb.get(key1), value1, 'a2')
         self.assertEqual(ydb.get(key2), value2, 'b2')
 
-    @utils.provide_ydb(max_file_size=6*1024*1024)
+    @utils.provide_ydb(min_log_size=6*1024*1024)
     def test_del(self, ydb):
         key1 = 'a'
         key2 = 'b'

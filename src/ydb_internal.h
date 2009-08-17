@@ -95,6 +95,7 @@ struct index_header{
 	u32	magic;
 	int	last_record_logno;
 	u64	last_record_offset;
+	u64	key_counter; /* not required for parsing, but usefull for memory pre-allocation */
 	u32	checksum;
 };
 
@@ -149,12 +150,12 @@ struct loglist {
 	int write_logno;
 	int write_fd;
 
-	u64 max_file_size;
+	u64 min_log_size;
 	u64 total_bytes; /* total size of all logs */
 	
 	u64 appended_bytes;
 };
-int loglist_open(struct loglist *llist, char *top_dir, u64 max_file_size, int max_descriptors);
+int loglist_open(struct loglist *llist, char *top_dir, u64 min_log_size, int max_descriptors);
 void loglist_close(struct loglist *llist);
 int loglist_get(struct loglist *llist, int logno, u64 value_offset, u64 value_size, char *dst, u32 dst_sz);
 void loglist_sync(struct loglist *llist);
@@ -217,6 +218,16 @@ struct db {
 
 int db_add(struct db *db, char *key, u16 key_sz, char *value, u32 value_sz);
 
+#define USED_BYTES(db)	\
+	(db->tree.key_bytes + db->tree.value_bytes)
+
+/* TODO: two adds instead of one */
+#define DOUBLE_RATIO(db, default)	\
+	(USED_BYTES(db) ? ((double)db->loglist.total_bytes / (double)USED_BYTES(db)) : default)
+#define INT_RATIO(db, default)	\
+	(USED_BYTES(db) ? (db->loglist.total_bytes / USED_BYTES(db)) : default)
+
+
 
 /* **** **** */
 /* key_record ... key ... padding ... value ... value_record ... padding */
@@ -224,7 +235,7 @@ int db_add(struct db *db, char *key, u16 key_sz, char *value, u32 value_sz);
 struct ydb_key_record{
 	u32	magic;
 	u32	checksum;
-	u16	flags; // deleted
+	u16	flags;		// deleted?
 	u16	key_sz;
 	u32	value_sz;	/* length of value, without the header */
 	char	data[];

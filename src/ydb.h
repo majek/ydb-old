@@ -1,11 +1,6 @@
 #ifndef YDB_H
 #define YDB_H
 
-/***************************************************************************
- *  *
- *  *
- *  *
- */
 
 /* A database structure. */
 typedef void *YDB;
@@ -17,7 +12,7 @@ typedef void *YDB;
 /* Open a database from a specified directory, or create a new one. */
 YDB ydb_open(char *directory,
 	     int overcommit_factor,
-	     unsigned long long max_file_size,
+	     unsigned long long min_log_size,
 	     int flags);
 
 /* Make sure everything needed is flushed to disk. */

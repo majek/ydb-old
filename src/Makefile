@@ -19,7 +19,7 @@ CC=gcc
 
 DEBUG_FLAGS=-pg -fprofile-arcs -ftest-coverage -O0
 C_FLAGS=$(DEBUG_FLAGS) -fPIC -g -Wall -fstack-protector-all -pthread
-LIB_FLAGS=$(DEBUG_FLAGS) -g -Wall -shared -Wl,-soname,$(LIBNAME) -lc
+LIB_FLAGS=$(DEBUG_FLAGS) -g -Wall -shared -Wl,-soname,$(LIBNAME) -lc -lrt
 
 all: $(LIBNAME)
 
