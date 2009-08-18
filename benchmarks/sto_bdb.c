@@ -101,6 +101,11 @@ MC_STORAGE_API *storage_bdb_create(char *db_file) {
 		fprintf(stderr, "db_create()=%s\n", db_strerror(ret));
 		abort();
 	}
+	/* http://www.dmo.ca/blog/benchmarking-hash-databases-on-large-data/
+		96MB of cache
+		
+	*/
+	bdb->dbp->set_cachesize(bdb->dbp, 0, 96*1024*1024, 0);
 	
 	ret = bdb->dbp->open(bdb->dbp, /* DB structure pointer */
 		NULL,		/* Transaction pointer */

@@ -54,6 +54,12 @@ MC_STORAGE_API *storage_tc_create(char *db_file) {
 	TC_DATA *tcd = (TC_DATA *)zmalloc(sizeof(TC_DATA));
 	tcd->db_file = strdup(db_file);
 	tcd->hdb = tchdbnew();
+	/* http://www.dmo.ca/blog/benchmarking-hash-databases-on-large-data/
+		750MB xmsiz as described
+	*/
+	tchdbsetxmsiz(tcd->hdb, 750*1024*1024);
+	tchdbsetcache(tcd->hdb, 12000000);
+	
 	if(!tchdbopen(tcd->hdb, db_file, HDBOWRITER | HDBOCREAT)) {
 		int ecode = tchdbecode(tcd->hdb);
 		fprintf(stderr, "tchdbopen()= %s\n", tchdberrmsg(ecode));
