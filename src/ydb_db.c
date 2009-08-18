@@ -21,7 +21,7 @@ YDB ydb_open(char *top_dir,
 
 	/* no minimal limit, but warn */
 	if(min_log_size < (MAX_RECORD_SIZE))
-		log_warn("min_log_size is low, think again! %llu < %i", min_log_size, MAX_RECORD_SIZE);
+		log_warn("min_log_size is low, are you sure? %llu < %i", min_log_size, MAX_RECORD_SIZE);
 	// 2GiB maximum for 32-bit platform, we're mmaping the file on load
 	if(sizeof(char*) == 4 && min_log_size >= (1<<31))
 		log_warn("min_log_size is greater than 1<<31 on 32 bits machine. That's brave.");
@@ -58,7 +58,7 @@ YDB ydb_open(char *top_dir,
 			/* find an edge */
 			struct log *log = slot_get(&db->loglist, logno);
 			if(log)
-				db_info("Loading metadata from log %i/0x%x, offsets %lli-%lli", logno, logno, record_offset, log->file_size);
+				log_info("Loading metadata from log %i/0x%x, offsets %lli-%lli", logno, logno, record_offset, log->file_size);
 
 		}
 		char key[MAX_KEY_SIZE];
@@ -87,7 +87,6 @@ YDB ydb_open(char *top_dir,
 		}
 		record_offset += record_sz;
 	}
-	db_info("Loaded!");
 	
 	/* Compare used logs */
 	int start = MIN(rarr_min(db->tree.refcnt), rarr_min(db->loglist.logs));
@@ -100,9 +99,9 @@ YDB ydb_open(char *top_dir,
 		if(refcnt && log)
 			continue;
 		if(refcnt) {
-			db_error("Log %i(0x%x) used, but file is not loaded!", logno, logno);
-			db_error("Sorry to say but you'd lost %i key-values.", refcnt);
-			db_error("Closing db");
+			log_error("Log %i(0x%x) used, but file is not loaded!", logno, logno);
+			log_error("Sorry to say but you'd lost %i key-values.", refcnt);
+			log_error("Closing db");
 			/*  we're in inconsistent state */
 			db_close(db, 0);
 			return(NULL);
@@ -134,7 +133,7 @@ int db_unlink_old_logs(struct db *db) {
 				continue;
 			if(logno >= (db->tree.commited_last_record_logno - 1))
 				continue;
-			db_info("Log '%s' (%i) doesn't contain any used values. Deleting.", log->fname, logno);
+			log_info("Log '%s' (%i) doesn't contain any used values. Deleting.", log->fname, logno);
 			
 			loglist_unlink(&db->loglist, logno);
 			counter++;
@@ -150,14 +149,21 @@ void ydb_close(YDB ydb) {
 	assert(db->magic == YDB_STRUCT_MAGIC);
 	
 	db_close(db, 1);
-	log_info("ydb_close");
 	log_info(" **** ");
 }
 
 static void db_close(struct db *db, int save_index) {
 	/* wait till gc thread exits, this can take a while */
-	if(db->gc_running)
+	if(db->gc_running) {
 		gc_join(db);
+		if(save_index){
+			log_info("Saving index, on close, after gc.");
+			tree_save_index(&db->tree);
+			/* Unlink old logs after gc. */
+			db_unlink_old_logs(db);
+			save_index = 0;
+		}
+	}
 	/* no need to lock, as the thread doesn't exist */
 	
 	if(fsync(db->loglist.write_fd) < 0)
@@ -165,8 +171,9 @@ static void db_close(struct db *db, int save_index) {
 
 	if(save_index)
 		tree_save_index(&db->tree);
-	log_info("Closing log. %llu/%llu Overcommit ratio:%.2f",
-		USED_BYTES(db), db->loglist.total_bytes, DOUBLE_RATIO(db, 999.0));
+	log_info("Closing log. Usefull/total bytes: %llu/%llu. Current overcommit ratio/allowed ratio:%.2f/%i",
+		USED_BYTES(db), db->loglist.total_bytes, 
+		DOUBLE_RATIO(db, 999.0), db->overcommit_ratio);
 	
 	tree_close(&db->tree);
 	loglist_close(&db->loglist);
@@ -194,26 +201,41 @@ int ydb_add(YDB ydb, char *key, unsigned short key_sz,
 
 	/* TODO: error handling on write? */
 	DB_LOCK(db);
-	db_add(db, key, key_sz, value, value_sz);
+	if(db_add(db, key, key_sz, value, value_sz) < 0) {
+		value_sz = -1;
+		goto release;
+	}
 	
 	/* written two full log files and no gc running*/
 	if(db->gc_running == 0 && 
-	   (db->loglist.appended_bytes > (db->loglist.min_log_size << 1))) {
-		db_info("Saving index");
+	   (db->loglist.write_logno > (db->tree.commited_last_record_logno + 4))) {
+		log_info("Saving index, logno_in_last_index:%i curr_logno:%i",
+			db->tree.commited_last_record_logno,
+			db->loglist.write_logno);
 		tree_save_index(&db->tree);
 		db_unlink_old_logs(db);
 	}
 
-	double ratio = DOUBLE_RATIO(db, 999.0);
-	//log_info("ratio:%.3f/%.3f", ratio, (double)db->overcommit_ratio);
-	if(db->gc_running == 0 && (
-	    /* overcommit threshold is reached */
-	    ratio > (double)db->overcommit_ratio)) {
-		gc_spawn(db);
+	/* overcommit threshold is reached, clear old stuff than gc. */
+	if(db->gc_running == 0 && 
+	   (DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio)) {
+		db_unlink_old_logs(db);
+		if(DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio) {
+			log_info("Starting GC %.2f/%i",
+					DOUBLE_RATIO(db, 999.0),
+					db->overcommit_ratio);
+			gc_spawn(db);
+		}
 	}
 	
-	if(db->gc_finished)
+	if(db->gc_finished) {
 		gc_join(db);
+		log_info("Saving index after gc.");
+		tree_save_index(&db->tree);
+		/* Unlink old logs after gc. */
+		db_unlink_old_logs(db);
+	}
+release:
 	DB_UNLOCK(db);
 	return(value_sz);
 }
@@ -255,7 +277,7 @@ int ydb_get(YDB ydb, char *key, unsigned short key_sz,
 		
 	int needed = item->value_sz + MAX_PADDING + sizeof(struct ydb_value_record);
 	if(buf_sz < needed) {
-		db_error("ydb_get:buffer too small. is %i, should be at least %i", buf_sz, needed);
+		log_error("ydb_get:buffer too small. is %i, should be at least %i", buf_sz, needed);
 		goto error;
 	}
 	

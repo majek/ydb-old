@@ -82,8 +82,7 @@ static int gc_item_move(struct db *db, char *key, u16 key_sz, int logno, u64 val
 		goto release;
 	// 2. set the same value
 	/* TODO: error handling on write? */
-	db_add(db, key, key_sz, value, value_sz);
-	ret = 1; /* moved with success*/
+	ret = db_add(db, key, key_sz, value, value_sz);
 	
 release:
 #ifndef NO_THREADS
@@ -94,8 +93,8 @@ release:
 
 
 static int se_cmp(const void *a, const void *b) {
-	struct index_item *ii_a = (struct index_item *)a;
-	struct index_item *ii_b = (struct index_item *)b;
+	struct index_item *ii_a = *((struct index_item **)a);
+	struct index_item *ii_b = *((struct index_item **)b);
 	if(ii_a->logno == ii_b->logno){
 		if(ii_a->value_offset == ii_b->value_offset)
 			return(0);
@@ -115,11 +114,11 @@ load previous index file.
 void *gc_run_thread(void *vdb) {
 	struct db *db = (struct db *)vdb;
 	struct timespec a, b;
-	db_info("Starting GC thread");
+	log_info("Starting GC thread");
 	
 	int fd = open(db->tree.fname, O_RDONLY|O_LARGEFILE|O_NOATIME);
 	if(fd < 0) {
-		db_info("GC thread stopped. No index file found %s", db->tree.fname);
+		log_info("GC thread stopped. No index file found %s", db->tree.fname);
 		/* Index file can legally not exist, just go on. */
 		return((void*)-1);
 	}
@@ -136,14 +135,6 @@ void *gc_run_thread(void *vdb) {
 #ifndef NO_THREADS
 	DB_LOCK(db);
 #endif
-/*
-	u64 used_bytes = db->tree.key_bytes + db->tree.value_bytes;
-	u64 bytes_threshold = (double)used_bytes * ((double)db->overcommit_ratio/2.0);
-	int can_have_logs = (bytes_threshold / db->loglist.min_log_size);
-	int recent_logno = db->loglist.write_logno - can_have_logs;
-
-	db_info("GC: max_log:%i, recent_log:%i", db->loglist.write_logno, recent_logno);
-*/
 
 	int ocr = db->overcommit_ratio;
 	u64 allowed_bytes = USED_BYTES(db) * ((ocr-1)/2 + 1);
@@ -180,15 +171,13 @@ void *gc_run_thread(void *vdb) {
 		ptr += sizeof(struct index_item) + ROUND_UP(ii->key_sz, PADDING);
 		
 		if(ii->magic != INDEX_ITEM_MAGIC)
-			goto error_unmap;
+			goto error_freese;
 		u32 read_checksum = ii->checksum;
 		ii->checksum = 0;
 		if(read_checksum != adler32(ii, sizeof(struct index_item) + ii->key_sz))
-			goto error_unmap;
+			goto error_freese;
 	
 		counter++;
-		//if(ii->logno >= recent_logno)
-		//	continue;
 		
 		se[item_no] = ii;
 		item_no++;
@@ -196,9 +185,9 @@ void *gc_run_thread(void *vdb) {
 			break;
 	}
 	clock_gettime(CLOCK_MONOTONIC, &b);
-	log_info("Reading index took %3llims, %i items loaded.", TIMESPEC_SUBTRACT(b, a)/1000000, item_no);
+	log_info("Reading index took %3llims, %i keys loaded.", TIMESPEC_SUBTRACT(b, a)/1000000, item_no);
 	
-	clock_gettime(CLOCK_MONOTONIC, &b);
+	clock_gettime(CLOCK_MONOTONIC, &a);
 	qsort(se, item_no, sizeof(struct index_item *), se_cmp);
 	clock_gettime(CLOCK_MONOTONIC, &b);
 	log_info("Sorting took %3llims", TIMESPEC_SUBTRACT(b, a)/1000000);
@@ -208,7 +197,7 @@ void *gc_run_thread(void *vdb) {
 		struct index_item *ii = se[i];
 		int ok = gc_item_move(db, ii->key, ii->key_sz, ii->logno, ii->value_offset);
 		if(ok) {
-			//log_info("moved key %*s", ii->key_sz, ii->key);
+			//log_info("moved logno:%i key:%.*s", ii->logno, ii->key_sz, ii->key);
 			ok_counter += ok;
 			freed_bytes +=  KEY_RECORD_SIZE(ii->key_sz) \
 				      + VALUE_RECORD_SIZE(ii->value_sz);
@@ -221,8 +210,9 @@ void *gc_run_thread(void *vdb) {
 
 	if(munmap(mmap_ptr, file_size) < 0)
 		log_perror("munmap()");
+	free(se);
 	close(fd);
-	db_info("Finished GC thread, success, items/moved %i/%i", counter, ok_counter);
+	log_info("Finished GC thread, success, items/moved %i/%i", counter, ok_counter);
 #ifndef NO_THREADS
 	DB_LOCK(db);
 #endif
@@ -232,12 +222,14 @@ void *gc_run_thread(void *vdb) {
 #endif
 	return((void*)0);
 
+error_freese:
+	free(se);
 error_unmap:
 	if(munmap(mmap_ptr, file_size) < 0)
 		log_perror("munmap()");
 error_close:
 	close(fd);
-	db_info("Finished GC thread, error");
+	log_info("Finished GC thread, error");
 #ifndef NO_THREADS
 	DB_LOCK(db);
 #endif

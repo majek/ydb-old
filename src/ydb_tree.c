@@ -288,11 +288,8 @@ int tree_save_index(struct tree *tree) {
 	}
 	/* no resources left to be closed */
 	
-	/* TODO: check if tree->fname exists */
-	/* TODO: move older indexes to backups :)*/
-	
 	/* ignore errors */
-	rename(tree->fname, tree->fname_old);
+	unlink_with_history(tree->fname, tree->fname_old, 4);
 	
 	/* this is pretty important */
 	if(rename(tree->fname_new, tree->fname) < 0) {

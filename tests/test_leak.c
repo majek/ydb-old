@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
 	
 	char ydb_dir[256];
 	snprintf(ydb_dir, sizeof(ydb_dir),"%s", argv[1]);
-	YDB ydb = ydb_open(ydb_dir, 4, 5*1024*1024, YDB_CREAT);
+	YDB ydb = ydb_open(ydb_dir, 2, 4*1024*1024, YDB_CREAT);
 	
 	snprintf(key, sizeof(key), "xxxx");
 	ydb_add(ydb, key, sizeof(key), value, sizeof(value)/2);
@@ -29,20 +29,21 @@ int main(int argc, char **argv) {
 	/* add */
 	for(i=0; i < 64; i++) {
 		snprintf(key, sizeof(key), "key %i", i);
+		ydb_add(ydb, key, strlen(key), "a", 1); /* something small, for gc */
 		ydb_add(ydb, key, sizeof(key), value, sizeof(value)/2);
 	}
 	/* replace */
-	for(i=1; i < 64; i+=4) {
+	for(i=1; i < 64; i++) {
 		snprintf(key, sizeof(key), "key %i", i);
 		ydb_add(ydb, key, sizeof(key), value, sizeof(value)/4);
 	}
 	/* delete */
-	for(i=2; i < 64; i+=4) {
+	for(i=2; i < 64; i++) {
 		snprintf(key, sizeof(key), "key %i", i);
 		ydb_del(ydb, key, sizeof(key));
 	}
 	/* get */
-	for(i=3; i < 64; i+=4) {
+	for(i=3; i < 64; i++) {
 		snprintf(key, sizeof(key), "key %i", i);
 		ydb_get(ydb, key, sizeof(key), value2, sizeof(value2));
 	}

@@ -27,5 +27,5 @@ testleaks: all
 	valgrind --max-stackframe=932554432 --leak-check=full  --tool=memcheck  ./test_leak /tmp/ydb-testleak
 	rm /tmp/ydb-testleak/*ydb
 	rm -r /tmp/ydb-testleak
-	#rm test_leak
+	rm test_leak
 	

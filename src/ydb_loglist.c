@@ -138,7 +138,11 @@ int loglist_open(struct loglist *llist, char *top_dir, u64 min_log_size, int max
 	llist->min_log_size = min_log_size;
 	llist->logs = rarr_new();
 	llist->top_dir = strdup(top_dir);
-		
+	char unlink_base[256];
+	snprintf(unlink_base, sizeof(unlink_base), "%s%s%s%s.old",
+				top_dir, PATH_DELIMITER, DATA_FNAME, DATA_EXT);
+	llist->unlink_base = strdup(unlink_base);
+	
 	glob_t globbuf;
 	globbuf.gl_offs = 1;
 	char glob_str[256];
@@ -154,7 +158,7 @@ int loglist_open(struct loglist *llist, char *top_dir, u64 min_log_size, int max
 	glob(glob_str, 0, NULL, &globbuf);
 	for(off=globbuf.gl_pathv; off && *off; off++) {
 		int logno = logno_from_fname(*off, prefix_len, suffix_len);
-		log_info("Opening log: %5i/0x%04x", logno, logno);
+		log_info("Opening log: %s (%04i)", *off, logno);
 		if(log_open(llist, logno) < 0) {
 			log_error("Unable to open log %5i/0x%04x", logno, logno);
 			continue;
@@ -196,6 +200,7 @@ void loglist_close(struct loglist *llist) {
 	close(llist->write_fd);
 	rarr_free(llist->logs);
 	free(llist->top_dir);
+	free(llist->unlink_base);
 }
 
 
@@ -420,7 +425,7 @@ int loglist_unlink(struct loglist *llist, int logno) {
 	
 	loglist_free_log(llist, logno);
 
-	return safe_unlink(path);
+	return unlink_with_history(path, llist->unlink_base, 4);
 }
 
 

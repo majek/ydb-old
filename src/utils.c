@@ -38,7 +38,7 @@ void ydb_log(char *file, int line, char *type, void *ptr, const char *fmt, ...) 
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	
-	struct tm *tmp = localtime(&tv.tv_sec);
+	struct tm *tmp = gmtime(&tv.tv_sec); // UTC
 	
 	char tb[32];
 	strftime(tb, sizeof(tb), "%Y-%m-%d %H:%M:%S", tmp);

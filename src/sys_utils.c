@@ -21,7 +21,25 @@ int safe_unlink(const char *old_path) {
 	char new_path[256];
 	snprintf(new_path, sizeof(new_path), "%s~", old_path);
 	if(rename(old_path, new_path) != 0) {
-		log_perror("rename()");
+		log_perror("rename(%s, %s)", old_path, new_path);
+		return(-1);
+	}
+	return(0);
+}
+
+int unlink_with_history(const char *old_path, const char *new_base, int versions) {
+	char new_path1[256];
+	char new_path2[256];
+	int i;
+	for(i=(versions-1); i > 0; i--) {
+		snprintf(new_path1, sizeof(new_path1), "%s%02i", new_base, i);
+		snprintf(new_path2, sizeof(new_path2), "%s%02i", new_base, i+1);
+		/* ignore errors */
+		rename(new_path1, new_path2);
+	}
+	snprintf(new_path1, sizeof(new_path1), "%s%02i", new_base, 1);
+	if(rename(old_path, new_path1) != 0) {
+		log_perror("rename(%s, %s)", old_path, new_path1);
 		return(-1);
 	}
 	return(0);

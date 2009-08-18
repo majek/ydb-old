@@ -146,6 +146,7 @@ unsigned int refcnt_get(struct tree *tree, int logno);
 struct loglist {
 	r_arr logs;
 	char *top_dir;
+	char *unlink_base;
 
 	int write_logno;
 	int write_fd;
@@ -252,6 +253,7 @@ void gc_join(struct db *db);
 
 /* **** sys_utils.c **** */
 int safe_unlink(const char *old_path);
+int unlink_with_history(const char *old_path, const char *new_base, int versions);
 int max_descriptors();
 int writeall(int fd, void *sbuf, size_t count);
 int preadall(int fd, void *sbuf, size_t count, size_t offset);

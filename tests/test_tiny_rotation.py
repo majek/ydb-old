@@ -47,7 +47,7 @@ class TestTinyRotation(utils.YdbTest):
             self.assertEqual(ydb.get(key), None)
 
 
-        self.assertEqual(0, 1)
+        #self.assertEqual(0, 1)
 
 
 if __name__ == '__main__':
