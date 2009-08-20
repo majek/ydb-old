@@ -61,6 +61,7 @@ int writeall(int fd, void *sbuf, size_t count) {
 	char *buf = (char *)sbuf;
 	size_t pos = 0;
 	while(pos < count) {
+		errno = 0;
 		int r = write(fd, &buf[pos], count-pos);
 		if(errno == EINTR)
 			continue;
@@ -77,6 +78,7 @@ int preadall(int fd, void *sbuf, size_t count, size_t offset) {
 	char *buf = (char *)sbuf;
 	size_t pos = 0;
 	while(pos < count) {
+		errno = 0;
 		ssize_t r = pread(fd, buf+pos, count-pos, offset+pos);
 		if(r == 0) {
 			if(errno == EINTR)
