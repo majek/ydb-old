@@ -37,6 +37,7 @@ int unlink_with_history(const char *old_path, const char *new_base, int versions
 		/* ignore errors */
 		rename(new_path1, new_path2);
 	}
+	/* TODO: if file doesn't exits, just move on */
 	snprintf(new_path1, sizeof(new_path1), "%s%02i", new_base, 1);
 	if(rename(old_path, new_path1) != 0) {
 		log_perror("rename(%s, %s)", old_path, new_path1);
