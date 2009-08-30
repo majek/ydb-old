@@ -37,7 +37,12 @@ unsigned int get_rand() {
 	return(buf[buf_pos++]);
 }
 
+extern int ydb_log_size;
+extern int ydb_overcommit_factor;
+
 int main() {
+	ydb_log_size = 128*1024*1024;
+	ydb_overcommit_factor = 3;
 	struct timespec t0, t1;
 	long long td;
 
@@ -45,21 +50,22 @@ int main() {
 	memset(value, 'v', sizeof(value));
 
 	MC_STORAGE_API *api = storage_ydb_create("/tmp/ydb");
-	int i, j, r;
-	for(i=0; i < 4096; i++) {
+	int i=0, j, r;
+	while(1) {
+		i++;
 		clock_gettime(CLOCK_MONOTONIC, &t0);
 		
 		for(j=0; j<4096; j++) {
 			char key[256];
-			r = get_rand() % 16000;
-			int vlen = get_rand() % 16000;
+			r = get_rand() % (100*1000);
+			int vlen = 80 + (get_rand() % 128);
 			int klen = snprintf(key, sizeof(key), "key_%i", r);
 			storage_set(api, value, vlen, key, klen);
 		}
 		
 		clock_gettime(CLOCK_MONOTONIC, &t1);
 		td = TIMESPEC_SUBTRACT(t1, t0);
-		printf(" %4i: %4llims  %4lli rec/sec\n", i, td/1000000, (4096/td)/1000000000);
+		printf(" %4i: %4llims  %.3f rec/sec\n", i, td/1000000, (4096.0/(td/1000000000.0)));
 	}
 	storage_ydb_destroy(api);
 	return(0);

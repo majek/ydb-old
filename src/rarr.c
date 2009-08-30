@@ -54,7 +54,17 @@ r_arr rarr_new() {
 void rarr_free(r_arr v) {
 	struct rarr *a = (struct rarr *)v;
 	assert(a->magic == RARR_MAGIC);
+	if(a->filled_items != 0)
+		fprintf(stderr,"filled_items = %i\n",a->filled_items);
 	assert(a->filled_items == 0);
+	
+	free(a->arr);
+	free(a);
+}
+
+void rarr_free_and_clear(r_arr v) {
+	struct rarr *a = (struct rarr *)v;
+	assert(a->magic == RARR_MAGIC);
 	
 	free(a->arr);
 	free(a);
@@ -76,14 +86,14 @@ void *rarr_get(r_arr v, int idx) {
 	return(NULL);
 }
 
-void rarr_shift(struct rarr *a, int idx) {
+void rarr_shift(struct rarr *a, int off) {
 	if(++a->clear_count < CLEAR_THRESHOLD)
 		return;
 	a->clear_count = 0;
 	
 	int i;
-	assert(idx < a->size);
-	for(i=0; i<idx; i++) {
+	assert(off < a->size);
+	for(i=0; i<off; i++) {
 		if(a->arr[i] != NULL)
 			break;
 	}
@@ -114,9 +124,10 @@ void rarr_clear(r_arr v, int idx) {
 	assert(a->magic == RARR_MAGIC);
 	
 	if(idx >= a->offset && idx < (a->offset + a->size)) {
+		if(a->arr[idx - a->offset] != NULL)
+			a->filled_items--;
 		a->arr[idx - a->offset] = NULL;
-		rarr_shift(v, idx);
-		a->filled_items--;
+		rarr_shift(v, idx - a->offset);
 		return;
 	}else{ // out of range
 		return;
@@ -200,6 +211,25 @@ int main(int argc, char *argv[]) {
 	assert(rarr_get(rarr, 2048) == (void*)2048);
 	
 	// free
+	rarr_free_and_clear(rarr);
+	
+	// new one. go through a lot of elements with a filled window of about 4
+	rarr = rarr_new();
+	rarr_set(rarr, 0, (void*)1);
+	rarr_set(rarr, 1, (void*)1);
+	rarr_set(rarr, 2, (void*)1);
+	rarr_set(rarr, 3, (void*)1);
+	for(i=0; i<4096; i++) {
+		assert(rarr_get_filled_items(rarr) == 4);
+		rarr_set(rarr, i, NULL);
+		rarr_set(rarr, i+4, (void*)1);
+	}
+	rarr_set(rarr, i+0, NULL);
+	rarr_set(rarr, i+1, NULL);
+	rarr_set(rarr, i+2, NULL);
+	rarr_set(rarr, i+3, NULL);
+	rarr_set(rarr, i+4, NULL);
+	rarr_set(rarr, i+5, NULL);
 	rarr_free(rarr);
 	return(0);
 }

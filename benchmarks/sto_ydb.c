@@ -35,10 +35,13 @@ static void sync(void *storage_data) {
 }
 
 
+int ydb_log_size = 512*1024*1024;
+int ydb_overcommit_factor = 4;
+
 MC_STORAGE_API *storage_ydb_create(char *db_file) {
 	YDB_DATA *ydbd = (YDB_DATA *)zmalloc(sizeof(YDB_DATA));
 
-	ydbd->ydb = ydb_open(db_file, 4, 512*1024*1024, YDB_CREAT);
+	ydbd->ydb = ydb_open(db_file, ydb_overcommit_factor, ydb_log_size, YDB_CREAT);
 	if(ydbd->ydb == NULL) {
 		fprintf(stderr, "ydb_create()=NULL\n");
 		abort();

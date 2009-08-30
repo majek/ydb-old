@@ -120,7 +120,7 @@ void *gc_run_thread(void *vdb) {
 	if(fd < 0) {
 		log_info("GC thread stopped. No index file found %s", db->tree.fname);
 		/* Index file can legally not exist, just go on. */
-		return((void*)-1);
+		goto error_unlock;
 	}
 	u64 file_size;
 	if(get_fd_size(fd, &file_size) < 0)
@@ -230,6 +230,7 @@ error_unmap:
 error_close:
 	close(fd);
 	log_info("Finished GC thread, error");
+error_unlock:
 #ifndef NO_THREADS
 	DB_LOCK(db);
 #endif
