@@ -36,22 +36,22 @@ build-prof/libydb.so: $(patsubst %.o,build-prof/%.o,$(O_FILES))
 	$(CC) $(PROF_LFLAGS) -o $@ $^
 
 
-build-rel/%.o: %.c $(DEPS_FILES)
+build-rel/%.o: %.c .deps/%.d
 	@[ ! -e $(@D) ] && mkdir $(@D) || true
 	$(CC) $(REL_CFLAGS) -o $@ -c $<
 
-build-cov/%.o: %.c $(DEPS_FILES)
+build-cov/%.o: %.c .deps/%.d
 	@[ ! -e $(@D) ] && mkdir $(@D) || true
 	$(CC) $(COV_CFLAGS) -o $@ -c $<
 
-build-prof/%.o: %.c $(DEPS_FILES)
+build-prof/%.o: %.c .deps/%.d
 	@[ ! -e $(@D) ] && mkdir $(@D) || true
 	$(CC) $(PROF_CFLAGS) -o $@ -c $<
 
 
 clean:
-	rm -f libydb.so
-	rm -rf build-rel build-cov build-prof || true
+	rm -f libydb.so *.gcov
+	rm -rf .deps build-rel build-cov build-prof || true
 	#rm -f *.gcno *.gcda *.gcov *.o *~ *.orig *.so *.d gmon.out
 
 

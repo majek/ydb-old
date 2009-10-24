@@ -1,9 +1,12 @@
-TESTS=unittest doctest
+TESTS=doctest unittest
 
 PYTHON=/usr/bin/python
 
 all:
-	@$(MAKE) -C src --no-print-directory
+	@$(MAKE) -C src all
+
+src/build-cov/libydb.so:
+	@$(MAKE) -C src build-cov/libydb.so
 
 clean:
 	$(MAKE) -C src clean
@@ -12,13 +15,14 @@ clean:
 	rm -f ydb.log tests/ydb.log tests/.coverage
 
 #strace -fFo /tmp/ydbtest.strace
-test: all
+test: src/build-cov/libydb.so
 	@rm -f src/*.gcda src/*.gcov
-	@echo "\n[*] **** starting tests ****"
-	@cd tests && PYTHONPATH=.. $(PYTHON) run.py $(TESTS)
-	@echo "\n[*] **** code coverage ****"
-	@cd src && gcov *.c > /dev/null 2>/dev/null
-	@$(PYTHON) gcovst.py src/*.c.gcov
+	@echo -e "\n[*] **** starting tests ****"
+	@cd tests && LIBYDB=../src/build-cov/ PYTHONPATH=.. $(PYTHON) run.py $(TESTS)
+	@echo -e "\n[*] **** code coverage ****"
+	@cd src && for i in *.c; do gcov -o build-cov -bc $$i; done > /dev/null 2>/dev/null
+	@$(PYTHON) gcovst.py src
+	
 
 
 testleaks: all

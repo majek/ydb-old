@@ -32,13 +32,13 @@ static void item_del(struct tree *tree, struct item *item);
 
 
 static inline void refcnt_incr(struct tree *tree, int logno) {
-	uint refcnt = (uint)rarr_get(tree->refcnt, logno);
+	ulong refcnt = (ulong)rarr_get(tree->refcnt, logno);
 	refcnt += 1;
 	rarr_set(tree->refcnt, logno, (void*)refcnt);
 }
 
 static inline void refcnt_decr(struct tree *tree, int logno) {
-	uint refcnt = (uint)rarr_get(tree->refcnt, logno);
+	ulong refcnt = (ulong)rarr_get(tree->refcnt, logno);
 	refcnt -= 1;
 	assert(refcnt >= 0);
 	rarr_set(tree->refcnt, logno, (void*)refcnt);
@@ -56,8 +56,8 @@ static int key_cmp(char *a, int a_sz, char *b, int b_sz) {
 	return(r);
 }
 
-uint refcnt_get(struct tree *tree, int logno) {
-	return (uint)rarr_get(tree->refcnt, logno);
+ulong refcnt_get(struct tree *tree, int logno) {
+	return (ulong)rarr_get(tree->refcnt, logno);
 }
 
 int tree_open(struct tree *tree, char *fname, int *last_record_logno, u64 *last_record_offset, int flags) {
@@ -330,7 +330,7 @@ int tree_load_index(struct tree *tree, int *last_record_logno, u64 *last_record_
 	if(mmap_ptr == MAP_FAILED) {
 		log_perror("mmap()");
 		reason = "mmap failed";
-		goto error_unmap;
+		goto error_close;
 	}
 
 	char *buf = mmap_ptr;

@@ -371,9 +371,9 @@ static s64 loglist_do_write(struct loglist *llist, char *buf, int buf_sz) {
 	return(offset);
 }
 
+char buf[MAX_RECORD_SIZE];
 
 struct append_info loglist_append(struct loglist *llist, char *key, u16 key_sz, char *value, u32 value_sz, int flags) {
-	char buf[MAX_RECORD_SIZE];
 
 	int sz, i;
 	char *buf_ptr = buf;

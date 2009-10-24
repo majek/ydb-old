@@ -139,7 +139,7 @@ struct tree_sig{
 int tree_open(struct tree *tree, char *fname, int *last_record_logno, u64 *last_record_offset, int flags);
 void tree_close(struct tree *tree);
 
-unsigned int refcnt_get(struct tree *tree, int logno);
+unsigned long refcnt_get(struct tree *tree, int logno);
 
 #define WRITE_FD_BUFFER_SZ 128
 

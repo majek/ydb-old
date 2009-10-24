@@ -2,7 +2,7 @@ import ctypes
 import os
 
 LIBNAME="libydb.so"
-PATHS=[".", "..", "../src/", "./src"]
+PATHS=[os.getenv('LIBYDB', '.'), ".", "..", "../src/", "./src"]
 
 for path in PATHS:
     path = os.path.join(path, LIBNAME)

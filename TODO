@@ -1,3 +1,5 @@
+ * Stack is limited to 8MB...
+ 
  * auto create top dir
 
  * warn when creating/removing log files

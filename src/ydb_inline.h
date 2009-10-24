@@ -1,5 +1,5 @@
 #define MOD_ADLER 65521
-static u32 adler32(void *sdata, size_t len) {
+static inline u32 adler32(void *sdata, size_t len) {
 	u8 *data = (u8*)sdata;
 	u32 a = 1, b = 0;
 	
