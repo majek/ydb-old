@@ -119,6 +119,10 @@ static struct log* log_new(char *fname) {
 		close(fd);
 		return(NULL);
 	}
+	
+	if(0 != posix_fadvise(fd, 0, 0, POSIX_FADV_RANDOM)) {
+		log_perror("posix_fadvise()");
+	}
 
 	struct log *log = (struct log *)zmalloc(sizeof(struct log));
 	log->fname = strdup(fname);
@@ -322,9 +326,13 @@ record_error:
 	return(END_OF_FILE);
 }
 
-static int llist_write_log_rotate(struct loglist *llist) {
+void loglist_fsync(struct loglist *llist) {
 	if(fsync(llist->write_fd))
 		log_perror("fsync()");
+}
+
+static int llist_write_log_rotate(struct loglist *llist) {
+	loglist_fsync(llist);
 
 	log_info("New log created: %i", llist->write_logno+1);
 	if(log_create(llist, llist->write_logno+1) < 0)

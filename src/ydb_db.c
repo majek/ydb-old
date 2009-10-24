@@ -114,7 +114,7 @@ YDB ydb_open(char *top_dir,
 
 int db_unlink_old_logs(struct db *db) {
 	int logno;
-	int counter;
+	int counter = 0;
 	int start = MIN(rarr_min(db->tree.refcnt), rarr_min(db->loglist.logs));
 	int stop  = MAX(rarr_max(db->tree.refcnt), rarr_max(db->loglist.logs));
 	for(logno=start; logno < stop; logno++) {
@@ -165,9 +165,7 @@ static void db_close(struct db *db, int save_index) {
 		}
 	}
 	/* no need to lock, as the thread doesn't exist */
-	
-	if(fsync(db->loglist.write_fd) < 0)
-		log_perror("fsync()");
+	loglist_fsync(&db->loglist);
 
 	if(save_index)
 		tree_save_index(&db->tree);
@@ -185,8 +183,7 @@ void ydb_sync(YDB ydb) {
 	struct db *db = (struct db *) ydb;
 	assert(db->magic == YDB_STRUCT_MAGIC);
 	DB_LOCK(db);
-	if(fsync(db->loglist.write_fd) < 0)
-		log_perror("fsync()");
+	loglist_fsync(&db->loglist);
 	DB_UNLOCK(db);
 }
 

@@ -141,6 +141,7 @@ void tree_close(struct tree *tree);
 
 unsigned int refcnt_get(struct tree *tree, int logno);
 
+#define WRITE_FD_BUFFER_SZ 128
 
 /* **** **** */
 struct loglist {
@@ -156,6 +157,7 @@ struct loglist {
 	
 	u64 appended_bytes;
 };
+
 int loglist_open(struct loglist *llist, char *top_dir, u64 min_log_size, int max_descriptors);
 void loglist_close(struct loglist *llist);
 int loglist_get(struct loglist *llist, int logno, u64 value_offset, u64 value_size, char *dst, u32 dst_sz);
@@ -163,6 +165,8 @@ void loglist_sync(struct loglist *llist);
 struct log *slot_get(struct loglist *llist, int logno);
 int loglist_is_writer(struct loglist *llist, int logno);
 int loglist_unlink(struct loglist *llist, int logno);
+
+void loglist_fsync(struct loglist *llist);
 
 /* returns */
 struct append_info{
@@ -257,8 +261,7 @@ int unlink_with_history(const char *old_path, const char *new_base, int versions
 int max_descriptors();
 int writeall(int fd, void *sbuf, size_t count);
 int preadall(int fd, void *sbuf, size_t count, size_t offset);
-u32 adler32(void *sdata, size_t len);
-
 
 int get_fd_size(int fd, u64 *size);
 
+#include "ydb_inline.h"
