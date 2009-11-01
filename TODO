@@ -1,6 +1,20 @@
  * Stack is limited to 8MB...
- 
- * auto create top dir
+ * Fails to dump tree when it's more than 2GB on 32bit machine = due to mmap
+   error. = just don't do mmap, do buffered write/appends!
+ * Auto create top dir
+ * Move log to proper direcory.
+ * Version indexes.
+ * Version old data files properly.
+ * Memory statistics: average key length, keys in memory
+
+ * Client statistics:
+        host/port
+        hit ratio
+        commands/sec
+        transfer up/down
+        set requests
+        get requests
+
 
  * warn when creating/removing log files
  * warn when reading/dumping index 

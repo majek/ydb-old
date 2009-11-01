@@ -18,6 +18,7 @@
 #include <sys/mman.h>
 
 
+
 #ifndef O_LARGEFILE
 #define O_LARGEFILE 0
 #endif
@@ -72,6 +73,8 @@ int tree_open(struct tree *tree, char *fname, int *last_record_logno, u64 *last_
 	tree->fname_new = strdup(buf);
 
 	tree->root = RB_ROOT;
+	tree->keys_stddev = stddev_new();
+	tree->values_stddev = stddev_new();
 	
 	return tree_load_index(tree, last_record_logno, last_record_offset, flags);
 }
@@ -94,6 +97,8 @@ void tree_close(struct tree *tree) {
 	free(tree->fname);
 	free(tree->fname_old);
 	free(tree->fname_new);
+	stddev_free(tree->keys_stddev);
+	stddev_free(tree->values_stddev);
 }
 
 
@@ -141,7 +146,7 @@ static int item_insert(struct tree *tree, struct item *data) {
 	return 1;
 }
 
-int tree_add(struct tree *tree, char *key, u16 key_sz, int logno, 
+int tree_add(struct tree *tree, char *key, u16 key_sz, int logno,
 			u64 value_offset, u32 value_sz, u64 record_offset) {
 	struct item *old_item = tree_get(tree, key, key_sz);
 	
@@ -155,6 +160,8 @@ int tree_add(struct tree *tree, char *key, u16 key_sz, int logno,
 	}else{ // keys match
 		tree->value_bytes += VALUE_RECORD_SIZE(value_sz);
 		tree->value_bytes -= VALUE_RECORD_SIZE(old_item->value_sz);
+		stddev_modify(tree->values_stddev, old_item->value_sz, value_sz);
+		
 		refcnt_decr(tree, old_item->logno);
 		refcnt_incr(tree, logno);
 		
@@ -177,6 +184,10 @@ static struct item *item_new(struct tree *tree, char *key, u16 key_sz, \
 	tree->key_counter++;
 	tree->value_bytes += VALUE_RECORD_SIZE(value_sz);
 	tree->key_bytes += KEY_RECORD_SIZE(key_sz);
+	
+	stddev_add(tree->keys_stddev, key_sz);
+	stddev_add(tree->values_stddev, value_sz);
+	
 	refcnt_incr(tree, logno);
 	return(item);
 }
@@ -185,6 +196,10 @@ static void item_del(struct tree *tree, struct item *item) {
 	tree->key_counter--;
 	tree->value_bytes -= VALUE_RECORD_SIZE(item->value_sz);
 	tree->key_bytes -= KEY_RECORD_SIZE(item->key_sz);
+	
+	stddev_remove(tree->keys_stddev, item->key_sz);
+	stddev_remove(tree->values_stddev, item->value_sz);
+	
 	refcnt_decr(tree, item->logno);
 	free(item);
 }
@@ -214,10 +229,9 @@ int tree_save_index(struct tree *tree) {
 		  + sizeof(struct index_item) * tree->key_counter \
 		  + PADDING * tree->key_counter \
 		  + tree->key_bytes;
-	//u64 mmap_size = MAX(file_size, MMAP_MIN_ADDR);
 	
 	/* we delete the previous contents! */
-	int fd = open(tree->fname_new,  O_RDWR|O_TRUNC|O_APPEND|O_CREAT, S_IRUSR|S_IWUSR);
+	int fd = open(tree->fname_new,  O_RDWR|O_TRUNC|O_CREAT|O_LARGEFILE, S_IRUSR|S_IWUSR);
 	if(fd < 0) {
 		log_perror("open()");
 		return(-1);
@@ -226,17 +240,15 @@ int tree_save_index(struct tree *tree) {
 		log_perror("ftrunctate()");
 		goto error_close;
 	}
-	
-	char *mmap_ptr = mmap(NULL, file_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-	if(mmap_ptr == MAP_FAILED) {
-		log_perror("mmap()");
-		goto error_close;
+	if(0 != posix_fallocate(fd, 0, file_size)) {
+		log_perror("fallocate()");
 	}
-	char *buf = mmap_ptr;
-
-	struct index_header *ih = (struct index_header *)buf;
-	buf += sizeof(struct index_header);
 	
+	BUFFER buf = buf_writer_from_fd(fd);
+	int sz = sizeof(struct index_header);
+
+	struct index_header *ih = (struct index_header *)buf_writer(buf, sz);
+
 	*ih = (struct index_header) {
 		.magic = INDEX_HEADER_MAGIC,
 		.last_record_logno = tree->last_record_logno,
@@ -244,15 +256,14 @@ int tree_save_index(struct tree *tree) {
 		.key_counter = tree->key_counter
 	};
 	ih->checksum = adler32(ih, sizeof(struct index_header));
-
-	struct rb_node *node = rb_first(&tree->root);
 	
+	struct rb_node *node = rb_first(&tree->root);
 	while (node) {
 		struct item *item = container_of(node, struct item, node);
 		node = rb_next(node);
 		
-		struct index_item *ii = (struct index_item *)buf;
-		buf += sizeof(struct index_item) + ROUND_UP(item->key_sz, PADDING);
+		int ii_sz = sizeof(struct index_item) + ROUND_UP(item->key_sz, PADDING);
+		struct index_item *ii = (struct index_item *)buf_writer(buf, ii_sz);
 		
 		*ii = (struct index_item) {
 			.magic = INDEX_ITEM_MAGIC,
@@ -265,18 +276,12 @@ int tree_save_index(struct tree *tree) {
 		ii->checksum = adler32(ii, sizeof(struct index_item) + item->key_sz);
 	}
 
-	u64 written_bytes = buf - mmap_ptr; /* actually written */
+	u64 written_bytes = buf_writer_free(buf);
+
 	if(ftruncate(fd, written_bytes) < 0) {
 		log_perror("ftrunctate()");
 		goto error_close;
 	}
-	
-	if(msync(mmap_ptr, written_bytes, MS_SYNC) != 0) {
-		log_perror("msync()");
-		goto error_unmap;
-	}
-	if(munmap(mmap_ptr, file_size) < 0)
-		log_perror("munmap()");
 	
 	if(fsync(fd) < 0) {
 		log_perror("fsync()");
@@ -301,9 +306,6 @@ int tree_save_index(struct tree *tree) {
 	tree->commited_last_record_offset = tree->last_record_offset;
 	return(0);
 
-error_unmap:
-	if(munmap(mmap_ptr, file_size) < 0)
-		log_perror("munmap()");
 error_close:
 	close(fd);
 	return(-1);

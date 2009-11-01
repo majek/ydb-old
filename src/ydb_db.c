@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "ydb_internal.h"
 
 #include <stdlib.h>
@@ -7,8 +9,23 @@
 #include <sys/resource.h>
 // fsync
 #include <unistd.h>
+// fadvise
+
+#include <fcntl.h>
 
 static void db_close(struct db *db, int save_index);
+
+
+static void print_stats(struct db *db) {
+	int kcounter, vcounter;
+	double kavg, kdev, vavg, vdev;
+	
+	stddev_get(db->tree.keys_stddev, &kcounter, &kavg, &kdev);
+	stddev_get(db->tree.values_stddev, &vcounter, &vavg, &vdev);
+	log_info("Items: %i(%i)  Avg/stddev: Keys=%.3f/%.3f Values=%.3f/%.3f",
+			kcounter, vcounter,
+			kavg, kdev, vavg, vdev);
+}
 
 
 YDB ydb_open(char *top_dir,
@@ -99,8 +116,8 @@ YDB ydb_open(char *top_dir,
 		if(refcnt && log)
 			continue;
 		if(refcnt) {
-			log_error("Log %i(0x%x) used, but file is not loaded!", logno, logno);
-			log_error("Sorry to say but you'd lost %i key-values.", refcnt);
+			log_error("Log %i(0x%x) used, but file is not readable!", logno, logno);
+			log_error("Sorry to say but you'd lost %i keys.", refcnt);
 			log_error("Closing db");
 			/*  we're in inconsistent state */
 			db_close(db, 0);
@@ -109,8 +126,12 @@ YDB ydb_open(char *top_dir,
 		if(log)
 			continue;
 	}
-	return db;
+	
+	log_info("Memory footprint of a single key: %i+key_sz", sizeof(struct item));
+	print_stats(db);
+	return(db);
 }
+
 
 int db_unlink_old_logs(struct db *db) {
 	int logno;
@@ -218,6 +239,7 @@ int ydb_add(YDB ydb, char *key, unsigned short key_sz,
 	   (DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio)) {
 		db_unlink_old_logs(db);
 		if(DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio) {
+			print_stats(db);
 			log_info("Starting GC %.2f/%i",
 					DOUBLE_RATIO(db, 999.0),
 					db->overcommit_ratio);
@@ -227,10 +249,12 @@ int ydb_add(YDB ydb, char *key, unsigned short key_sz,
 	
 	if(db->gc_finished) {
 		gc_join(db);
-		log_info("Saving index after gc.");
-		tree_save_index(&db->tree);
-		/* Unlink old logs after gc. */
-		db_unlink_old_logs(db);
+		if(db->gc_ok) {
+			log_info("Saving index after gc.");
+			tree_save_index(&db->tree);
+			/* Unlink old logs after gc. */
+			db_unlink_old_logs(db);
+		}
 	}
 release:
 	DB_UNLOCK(db);
@@ -290,4 +314,72 @@ error:
 	return(-1);
 }
 
+static int item_cmp(const void *a, const void *b) {
+	struct item *ii_a = *((struct item **)a);
+	struct item *ii_b = *((struct item **)b);
+	if(ii_a->logno == ii_b->logno){
+		if(ii_a->value_offset == ii_b->value_offset)
+			return(0);
+		if(ii_a->value_offset < ii_b->value_offset)
+			return(-1);
+		return(1);
+	}
+	if(ii_a->logno < ii_b->logno)
+		return(-1);
+	return(1);
+}
 
+
+void ydb_prefetch(YDB ydb, char **keys, unsigned short *key_szs, int items_counter) {
+	struct db *db = (struct db *) ydb;
+	assert(db->magic == YDB_STRUCT_MAGIC);
+
+	struct item **items_start = (struct item **)malloc(sizeof(struct item_index *) * items_counter);
+	struct item **items = items_start;
+	DB_LOCK(db);
+	int i;
+	for(i=0; i < items_counter; i++, keys++, key_szs++) {
+		char *key = *keys;
+		int key_sz = *key_szs;
+		struct item *item = tree_get(&db->tree, key, key_sz);
+		if(item) {
+			*items = item;
+			items++;
+		}
+		
+	}
+	DB_UNLOCK(db);
+	
+	int items_sz = items - items_start;
+	qsort(items_start, items_sz, sizeof(struct item *), item_cmp);
+	
+	items = items_start;
+	int fd = -1;
+	int count = 0;
+	int offset = 0;
+	for(i=0; i < items_sz; i++, items++) {
+		struct item *item = *items;
+		
+		struct log *log = slot_get(&db->loglist, item->logno);
+		
+		size_t read_size = ROUND_UP(item->value_sz, PADDING) + sizeof(struct ydb_value_record);
+		
+		/* merge? */
+		if(fd == log->fd  &&  (offset + count + 4096) >= item->value_offset) {
+			count = (item->value_offset+read_size) - offset;
+		}else{
+			if(fd != -1) {
+				posix_fadvise(fd, offset, count, POSIX_FADV_WILLNEED);
+				//readahead(fd, offset, count);
+			}
+			fd = log->fd;
+			count = read_size;
+			offset = item->value_offset;
+		}
+	}
+	if(fd != -1) {
+		posix_fadvise(fd, offset, count, POSIX_FADV_WILLNEED);
+	}
+	
+	free(items_start);
+}

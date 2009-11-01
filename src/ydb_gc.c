@@ -52,6 +52,7 @@ void gc_spawn(struct db *db) {
 void gc_join(struct db *db) {
 	if(!db->gc_running)
 		return;
+	log_info("GC joined.");
 #ifndef NO_THREADS
 	if (pthread_join(db->gc_thread, NULL) != 0) {
 		log_perror("pthread_join()");
@@ -135,6 +136,7 @@ void *gc_run_thread(void *vdb) {
 #ifndef NO_THREADS
 	DB_LOCK(db);
 #endif
+	db->gc_ok = 0;
 
 	int ocr = db->overcommit_ratio;
 	u64 allowed_bytes = USED_BYTES(db) * ((ocr-1)/2 + 1);
@@ -217,6 +219,7 @@ void *gc_run_thread(void *vdb) {
 	DB_LOCK(db);
 #endif
 	db->gc_finished = 1;
+	db->gc_ok = 1;
 #ifndef NO_THREADS
 	DB_UNLOCK(db);
 #endif

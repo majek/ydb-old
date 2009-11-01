@@ -41,10 +41,11 @@ typedef int64_t s64;
 	(ROUND_UP(value_sz, PADDING) + sizeof(struct ydb_value_record))
 
 
-
-/* **** **** */
+typedef void* STDDEV;
 typedef void* r_arr;
 
+
+/* **** **** */
 r_arr rarr_new();
 void rarr_free(r_arr v);
 
@@ -87,6 +88,9 @@ struct tree {
 	u64 key_bytes;		/* used to store keys (incl header and padding) */
 	u64 value_bytes;	/* used to store values (incl header and padding) */
 	
+	STDDEV keys_stddev;
+	STDDEV values_stddev;
+	
 	r_arr refcnt;
 };
 
@@ -119,8 +123,8 @@ int tree_save_index(struct tree *tree);
 
 struct item {
 	struct rb_node node;
-	int logno;
 	u64 value_offset;
+	int logno;
 	u32 value_sz;
 
 	u16 key_sz;
@@ -215,6 +219,7 @@ struct db {
 	int gc_enabled;
 	int gc_running;
 	int gc_finished;
+	int gc_ok;
 	pthread_t gc_thread;
 	
 	pthread_mutex_t lock;	/**/
@@ -250,6 +255,7 @@ struct ydb_value_record{
 	u32	checksum;
 };
 
+
 /* **** **** */
 void gc_spawn(struct db *db);
 void gc_join(struct db *db);
@@ -264,4 +270,38 @@ int preadall(int fd, void *sbuf, size_t count, size_t offset);
 
 int get_fd_size(int fd, u64 *size);
 
+
+/* **** stats.c **** */
+STDDEV stddev_new();
+void stddev_free(STDDEV stddev);
+
+void stddev_add(STDDEV stddev, int value);
+void stddev_remove(STDDEV stddev, int old_value);
+void stddev_modify(STDDEV stddev, int old_value, int new_value);
+void stddev_get(STDDEV stddev, int *counter_ptr,
+		double *avg_ptr, double *stddev_ptr);
+
+
+/* **** buffer.c **** */
+struct buffer{
+	int fd;
+	u_int64_t count;
+	int start_pos;
+	int end_pos;
+	int buf_sz;
+	char buf[];
+};
+typedef struct buffer *BUFFER;
+
+BUFFER buf_writer_from_fd(int fd);
+char *buf_writer(BUFFER b, int sz);
+u_int64_t buf_writer_free(BUFFER b);
+
+BUFFER buf_reader_from_fd(int fd);
+char *buf_read(BUFFER b, int sz);
+u_int64_t buf_reader_free(BUFFER b);
+
+
+/* **** Premature optimization is the root of all evil... **** */
 #include "ydb_inline.h"
+
