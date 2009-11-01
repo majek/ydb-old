@@ -15,8 +15,7 @@
 
 static void db_close(struct db *db, int save_index);
 
-
-static void print_stats(struct db *db) {
+void print_stats(struct db *db) {
 	int kcounter, vcounter;
 	double kavg, kdev, vavg, vdev;
 	
@@ -226,7 +225,7 @@ int ydb_add(YDB ydb, char *key, unsigned short key_sz,
 	
 	/* written two full log files and no gc running*/
 	if(db->gc_running == 0 && 
-	   (db->loglist.write_logno > (db->tree.commited_last_record_logno + 4))) {
+	   (db->loglist.write_logno > (db->tree.commited_last_record_logno + 2))) {
 		log_info("Saving index, logno_in_last_index:%i curr_logno:%i",
 			db->tree.commited_last_record_logno,
 			db->loglist.write_logno);
@@ -237,13 +236,19 @@ int ydb_add(YDB ydb, char *key, unsigned short key_sz,
 	/* overcommit threshold is reached, clear old stuff than gc. */
 	if(db->gc_running == 0 && 
 	   (DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio)) {
-		db_unlink_old_logs(db);
 		if(DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio) {
-			print_stats(db);
-			log_info("Starting GC %.2f/%i",
-					DOUBLE_RATIO(db, 999.0),
-					db->overcommit_ratio);
-			gc_spawn(db);
+			struct timespec a;
+			clock_gettime(CLOCK_MONOTONIC, &a);
+			/* no more often than once 30 seconds */
+			if(TIMESPEC_SUBTRACT(a, db->gc_spawned)/1000000 > 30*1000) {
+				print_stats(db);
+				db->gc_spawned = a;
+				db_unlink_old_logs(db);
+				log_info("Starting GC %.2f/%i",
+						DOUBLE_RATIO(db, 999.0),
+						db->overcommit_ratio);
+				gc_spawn(db);
+			}
 		}
 	}
 	

@@ -62,7 +62,8 @@ void ydb_log(char *file, int line, char *type, void *ptr, const char *fmt, ...) 
 						buf);
 	}
 	
-	write(ydb_log_fd, buf2, strlen(buf2));
+	int r = write(ydb_log_fd, buf2, strlen(buf2));
+	r = 0;
 	fsync(ydb_log_fd);
 }
 

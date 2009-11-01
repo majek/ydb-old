@@ -220,6 +220,7 @@ struct db {
 	int gc_running;
 	int gc_finished;
 	int gc_ok;
+	struct timespec gc_spawned;
 	pthread_t gc_thread;
 	
 	pthread_mutex_t lock;	/**/
@@ -227,6 +228,8 @@ struct db {
 
 
 int db_add(struct db *db, char *key, u16 key_sz, char *value, u32 value_sz);
+void print_stats(struct db *db);
+
 
 #define USED_BYTES(db)	\
 	(db->tree.key_bytes + db->tree.value_bytes)
