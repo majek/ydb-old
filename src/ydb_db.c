@@ -374,8 +374,8 @@ void ydb_prefetch(YDB ydb, char **keys, unsigned short *key_szs, int items_count
 			count = (item->value_offset+read_size) - offset;
 		}else{
 			if(fd != -1) {
-				posix_fadvise(fd, offset, count, POSIX_FADV_WILLNEED);
-				//readahead(fd, offset, count);
+				//posix_fadvise(fd, offset, count, POSIX_FADV_WILLNEED);
+				readahead(fd, offset, count);
 			}
 			fd = log->fd;
 			count = read_size;
@@ -383,7 +383,8 @@ void ydb_prefetch(YDB ydb, char **keys, unsigned short *key_szs, int items_count
 		}
 	}
 	if(fd != -1) {
-		posix_fadvise(fd, offset, count, POSIX_FADV_WILLNEED);
+		//posix_fadvise(fd, offset, count, POSIX_FADV_WILLNEED);
+		readahead(fd, offset, count);
 	}
 	
 	free(items_start);

@@ -29,4 +29,20 @@
  * compilation without pthreads
  * online disable/enable gc
 
+2009-11-01 23:32:18.345 ydb_loglist.c:337  INFO   New log created: 17
+2009-11-01 23:34:48.590 ydb_loglist.c:337  INFO   New log created: 18
+2009-11-01 23:34:48.633 ydb_db.c:232       INFO   Saving index, logno_in_last_index:13 curr_logno:18
+2009-11-01 23:34:48.674 ydb_tree.c:226     INFO   Saving to index /tmp/wiki.ydb/index.ydb
+2009-11-01 23:42:41.784 ydb_loglist.c:337  INFO   New log created: 19
 
+2009-11-02 00:09:21.418 ydb_loglist.c:165  INFO   Opening log: /tmp/wiki.ydb/data0014.ydb (0020)
+2009-11-02 00:09:21.460 ydb_loglist.c:165  INFO   Opening log: /tmp/wiki.ydb/data0015.ydb (0021)
+2009-11-02 00:09:21.510 ydb_db.c:78        INFO   Loading metadata from log 17/0x11, offsets 536870180-536873280
+2009-11-02 00:09:21.571 ydb_db.c:78        INFO   Loading metadata from log 18/0x12, offsets 0-536870940
+WTF? 17 log is dumped or not?
+
+
+ Memory footprint of a single key: 36+key_sz
+ Items: 17076368(17076368)  Avg/stddev: Keys=17.000/6.557 Values=55.000/368.409
+996MEGS
+ Docs: add/del 1867776/0    Tokens: all/in_mem 923831860/6456255
