@@ -12,8 +12,8 @@ static inline u32 adler32(void *sdata, size_t len) {
 		b = (b + a) % MOD_ADLER;
 		len--;
 		
-		if(0 == (((long int)data) & 0x1F) )
-			PREFETCH(data + 32);
+		if(0 == (((long int)data) & 0x7F) )
+			PREFETCH(data + 128);
 	}
 	
 	return (b << 16) | a;

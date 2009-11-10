@@ -121,11 +121,15 @@ int tree_load_index(struct tree *tree, int *last_record_logno, u64 *last_record_
 int tree_save_index(struct tree *tree);
 
 
-struct item {
-	struct rb_node node;
+#ifndef PACKED
+#define PACKED __attribute__ ((packed))
+#endif
+
+struct PACKED item {
 	u64 value_offset;
-	int logno;
+	u32 logno;
 	u32 value_sz;
+	struct rb_node node;
 
 	u16 key_sz;
 	char key[];

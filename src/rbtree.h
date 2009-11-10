@@ -99,14 +99,18 @@ static inline struct page * rb_insert_page_cache(struct inode * inode,
 #include <linux/stddef.h>
 */
 
-struct rb_node
+#ifndef PACKED
+#define PACKED __attribute__ ((packed))
+#endif
+
+struct PACKED rb_node
 {
 	struct rb_node *rb_parent;
-	int rb_color;
 #define	RB_RED		0
 #define	RB_BLACK	1
 	struct rb_node *rb_right;
 	struct rb_node *rb_left;
+	char rb_color;
 };
 
 struct rb_root
