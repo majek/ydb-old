@@ -138,7 +138,8 @@ void log_del(struct log* log) {
 }
 
 
-int loglist_open(struct loglist *llist, char *top_dir, u64 min_log_size, int max_descriptors) {
+int loglist_open(struct loglist *llist, struct db *db, char *top_dir, u64 min_log_size, int max_descriptors) {
+	llist->db = db;
 	llist->min_log_size = min_log_size;
 	llist->logs = rarr_new();
 	llist->top_dir = strdup(top_dir);
@@ -155,7 +156,7 @@ int loglist_open(struct loglist *llist, char *top_dir, u64 min_log_size, int max
 	
 	snprintf(glob_str, sizeof(glob_str), "%s%s%s*%s",
 				top_dir, PATH_DELIMITER, DATA_FNAME, DATA_EXT);
-	int prefix_len = strlen(top_dir) + strlen(PATH_DELIMITER) + strlen(DATA_FNAME);
+	int prefix_len = strchr(glob_str, '*') - glob_str;
 	int suffix_len = strlen(DATA_EXT);
 	
 	/* Load data files */
@@ -348,15 +349,19 @@ static int llist_write_log_rotate(struct loglist *llist) {
 	return(0);
 }
 
-static s64 loglist_do_write(struct loglist *llist, char *buf, int buf_sz) {
+static s64 loglist_do_write(struct loglist *llist, char *buf, int buf_sz, u64 *record_offset_ptr) {
 	struct log *log = slot_get(llist, llist->write_logno);
 	assert(llist->write_fd >= 0);
 
 	int r = writeall(llist->write_fd, buf, buf_sz);
 	if(r < 1) {
 		log_error("Unable to write to log %i, opening new log, just in case", llist->write_logno);
-		llist_write_log_rotate(llist); /* we don't really care if it was with success */
-		return(-1);
+		/* never hurts to reply */
+		if(llist_write_log_rotate(llist) >= 0) {
+			r = writeall(llist->write_fd, buf, buf_sz);
+			if(r < 1)
+				return(-1);
+		}
 	}
 	
 	u64 offset = log->file_size;
@@ -367,7 +372,11 @@ static s64 loglist_do_write(struct loglist *llist, char *buf, int buf_sz) {
 	if(log->file_size > llist->min_log_size) {
 		if(llist_write_log_rotate(llist) < 0)
 			log_error("Unable to write to new log!");
+		/* hop context and save index */
+		db_save_index(llist->db);
 	}
+	if(record_offset_ptr)
+		*record_offset_ptr = offset;
 	return(offset);
 }
 
@@ -409,8 +418,9 @@ struct append_info loglist_append(struct loglist *llist, char *key, u16 key_sz, 
 	assert(sz <= MAX_RECORD_SIZE);
 	
 	int write_logno = llist->write_logno; // write log can be changed here
-	s64 record_offset = loglist_do_write(llist, buf, sz);
-	if(record_offset < 0)
+	u64 record_offset;
+	int ret = loglist_do_write(llist, buf, sz, &record_offset);
+	if(ret < 0)
 		abort();
 
 	struct append_info af;

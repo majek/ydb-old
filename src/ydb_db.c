@@ -13,14 +13,14 @@
 
 #include <fcntl.h>
 
-static void db_close(struct db *db, int save_index);
+static void db_close(struct db *db);
 
 void print_stats(struct db *db) {
 	int kcounter, vcounter;
 	double kavg, kdev, vavg, vdev;
 	
-	stddev_get(db->tree.keys_stddev, &kcounter, &kavg, &kdev);
-	stddev_get(db->tree.values_stddev, &vcounter, &vavg, &vdev);
+	stddev_get(db->tree->keys_stddev, &kcounter, &kavg, &kdev);
+	stddev_get(db->tree->values_stddev, &vcounter, &vavg, &vdev);
 	log_info("Items: %i(%i)  Avg/stddev: Keys=%.3f/%.3f Values=%.3f/%.3f",
 			kcounter, vcounter,
 			kavg, kdev, vavg, vdev);
@@ -40,21 +40,22 @@ YDB ydb_open(char *top_dir,
 		log_warn("min_log_size is low, are you sure? %llu < %i", min_log_size, MAX_RECORD_SIZE);
 	// 2GiB maximum for 32-bit platform, we're mmaping the file on load
 	if(sizeof(char*) == 4 && min_log_size >= (1<<31))
-		log_warn("min_log_size is greater than 1<<31 on 32 bits machine. That's brave.");
+		log_warn("min_log_size is greater than 1<<31 on 32 bit machine. That's brave.");
 	
 	struct db *db = (struct db *)zmalloc(sizeof(struct db));
+	db->tree = (struct tree *)zmalloc(sizeof(struct tree));
+	db->loglist = (struct loglist *)zmalloc(sizeof(struct loglist));
 	db->magic = YDB_STRUCT_MAGIC;
 	db->top_dir = strdup(top_dir);
 	db->overcommit_ratio = overcommit_ratio;
 	db->lock = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
 	db->flags = flags;
 	
-	char buf[256];
-	snprintf(buf, sizeof(buf), "%s%s%s", top_dir, PATH_DELIMITER, "index.ydb");
+	int tree_fileno = tree_get_max_fileno(top_dir);
 	
 	int logno = 0;
 	u64 record_offset = 0;
-	if(tree_open(&db->tree, buf, &logno, &record_offset, flags) < 0) {
+	if(tree_open(db->tree, db, tree_fileno, top_dir, &logno, &record_offset, flags) < 0) {
 		if(!(flags & YDB_CREAT)) {
 			log_error("Failed to load index file from %s", top_dir);
 			/* TODO: memleaks here */
@@ -62,7 +63,7 @@ YDB ydb_open(char *top_dir,
 		}
 	}
 	
-	int r = loglist_open(&db->loglist, top_dir, min_log_size, max_descriptors());
+	int r = loglist_open(db->loglist, db, top_dir, min_log_size, max_descriptors());
 	if(r < 0){
 		/* TODO: memleaks here */
 		return(NULL);
@@ -72,7 +73,7 @@ YDB ydb_open(char *top_dir,
 	while(1) {
 		if(record_sz == END_OF_FILE) {
 			/* find an edge */
-			struct log *log = slot_get(&db->loglist, logno);
+			struct log *log = slot_get(db->loglist, logno);
 			if(log)
 				log_info("Loading metadata from log %i/0x%x, offsets %lli-%lli", logno, logno, record_offset, log->file_size);
 
@@ -83,7 +84,7 @@ YDB ydb_open(char *top_dir,
 		u64 value_offset;
 		u32 value_sz;
 	
-		record_sz = loglist_get_record(&db->loglist,
+		record_sz = loglist_get_record(db->loglist,
 					logno, record_offset,
 					key, &key_sz,
 					&value_offset, &value_sz,
@@ -97,19 +98,19 @@ YDB ydb_open(char *top_dir,
 			break;
 		
 		if(FLAG_DELETE & flags) {
-			tree_del(&db->tree, key, key_sz, logno, record_offset);
+			tree_del(db->tree, key, key_sz, logno, record_offset);
 		}else{
-			tree_add(&db->tree, key, key_sz, logno, value_offset, value_sz, record_offset);
+			tree_add(db->tree, key, key_sz, logno, value_offset, value_sz, record_offset);
 		}
 		record_offset += record_sz;
 	}
 	
 	/* Compare used logs */
-	int start = MIN(rarr_min(db->tree.refcnt), rarr_min(db->loglist.logs));
-	int stop  = MAX(rarr_max(db->tree.refcnt), rarr_max(db->loglist.logs));
+	int start = MIN(rarr_min(db->tree->refcnt), rarr_min(db->loglist->logs));
+	int stop  = MAX(rarr_max(db->tree->refcnt), rarr_max(db->loglist->logs));
 	for(logno=start; logno<stop; logno++) {
-		uint refcnt = refcnt_get(&db->tree, logno);
-		struct log *log = slot_get(&db->loglist, logno);
+		uint refcnt = refcnt_get(db->tree, logno);
+		struct log *log = slot_get(db->loglist, logno);
 		if(refcnt == 0 && log == NULL)
 			continue;
 		if(refcnt && log)
@@ -119,7 +120,7 @@ YDB ydb_open(char *top_dir,
 			log_error("Sorry to say but you'd lost %i keys.", refcnt);
 			log_error("Closing db");
 			/*  we're in inconsistent state */
-			db_close(db, 0);
+			db_close(db);
 			return(NULL);
 		}
 		if(log)
@@ -132,14 +133,14 @@ YDB ydb_open(char *top_dir,
 }
 
 
-int db_unlink_old_logs(struct db *db) {
+int db_unlink_old_logs(struct db *db, int logno_x) {
 	int logno;
 	int counter = 0;
-	int start = MIN(rarr_min(db->tree.refcnt), rarr_min(db->loglist.logs));
-	int stop  = MAX(rarr_max(db->tree.refcnt), rarr_max(db->loglist.logs));
+	int start = MIN(rarr_min(db->tree->refcnt), rarr_min(db->loglist->logs));
+	int stop  = MAX(rarr_max(db->tree->refcnt), rarr_max(db->loglist->logs));
 	for(logno=start; logno < stop; logno++) {
-		uint refcnt = refcnt_get(&db->tree, logno);
-		struct log *log = slot_get(&db->loglist, logno);
+		uint refcnt = refcnt_get(db->tree, logno);
+		struct log *log = slot_get(db->loglist, logno);
 		if(refcnt == 0 && log == NULL)
 			continue;
 		if(refcnt && log)
@@ -149,13 +150,13 @@ int db_unlink_old_logs(struct db *db) {
 			continue;
 		}
 		if(log) {
-			if(loglist_is_writer(&db->loglist, logno))
+			if(loglist_is_writer(db->loglist, logno))
 				continue;
-			if(logno >= (db->tree.commited_last_record_logno - 1))
+			if(logno >= (db->tree->commited_last_record_logno - 1))
 				continue;
 			log_info("Log '%s' (%i) doesn't contain any used values. Deleting.", log->fname, logno);
 			
-			loglist_unlink(&db->loglist, logno);
+			loglist_unlink(db->loglist, logno);
 			counter++;
 			continue;
 		}
@@ -168,34 +169,27 @@ void ydb_close(YDB ydb) {
 	struct db *db = (struct db *) ydb;
 	assert(db->magic == YDB_STRUCT_MAGIC);
 	
-	db_close(db, 1);
+	db_close(db);
 	log_info(" **** ");
 }
 
-static void db_close(struct db *db, int save_index) {
+static void db_close(struct db *db) {
 	/* wait till gc thread exits, this can take a while */
 	if(db->gc_running) {
 		gc_join(db);
-		if(save_index){
-			log_info("Saving index, on close, after gc.");
-			tree_save_index(&db->tree);
-			/* Unlink old logs after gc. */
-			db_unlink_old_logs(db);
-			save_index = 0;
-		}
 	}
 	/* no need to lock, as the thread doesn't exist */
-	loglist_fsync(&db->loglist);
+	loglist_fsync(db->loglist);
 
-	if(save_index)
-		tree_save_index(&db->tree);
 	log_info("Closing log. Usefull/total bytes: %llu/%llu. Current overcommit ratio/allowed ratio:%.2f/%i",
-		USED_BYTES(db), db->loglist.total_bytes, 
+		USED_BYTES(db), db->loglist->total_bytes, 
 		DOUBLE_RATIO(db, 999.0), db->overcommit_ratio);
 	
-	tree_close(&db->tree);
-	loglist_close(&db->loglist);
+	tree_close(db->tree);
+	loglist_close(db->loglist);
 	free(db->top_dir);
+	free(db->tree);
+	free(db->loglist);
 	free(db);
 }
 
@@ -203,7 +197,7 @@ void ydb_sync(YDB ydb) {
 	struct db *db = (struct db *) ydb;
 	assert(db->magic == YDB_STRUCT_MAGIC);
 	DB_LOCK(db);
-	loglist_fsync(&db->loglist);
+	loglist_fsync(db->loglist);
 	DB_UNLOCK(db);
 }
 
@@ -223,16 +217,6 @@ int ydb_add(YDB ydb, char *key, unsigned short key_sz,
 		goto release;
 	}
 	
-	/* written two full log files and no gc running*/
-	if(db->gc_running == 0 && 
-	   (db->loglist.write_logno > (db->tree.commited_last_record_logno + 2))) {
-		log_info("Saving index, logno_in_last_index:%i curr_logno:%i",
-			db->tree.commited_last_record_logno,
-			db->loglist.write_logno);
-		tree_save_index(&db->tree);
-		db_unlink_old_logs(db);
-	}
-
 	/* overcommit threshold is reached, clear old stuff than gc. */
 	if(db->gc_running == 0 && 
 	   (DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio)) {
@@ -243,7 +227,7 @@ int ydb_add(YDB ydb, char *key, unsigned short key_sz,
 			if(TIMESPEC_SUBTRACT(a, db->gc_spawned)/1000000 > 30*1000) {
 				print_stats(db);
 				db->gc_spawned = a;
-				db_unlink_old_logs(db);
+				db_unlink_old_logs(db, db->loglist->write_logno);
 				log_info("Starting GC %.2f/%i",
 						DOUBLE_RATIO(db, 999.0),
 						db->overcommit_ratio);
@@ -254,12 +238,6 @@ int ydb_add(YDB ydb, char *key, unsigned short key_sz,
 	
 	if(db->gc_finished) {
 		gc_join(db);
-		if(db->gc_ok) {
-			log_info("Saving index after gc.");
-			tree_save_index(&db->tree);
-			/* Unlink old logs after gc. */
-			db_unlink_old_logs(db);
-		}
 	}
 release:
 	DB_UNLOCK(db);
@@ -270,9 +248,9 @@ release:
 int db_add(struct db *db, char *key, u16 key_sz, char *value, u32 value_sz) {
 	/* TODO: error handling on write? */
 	struct append_info af;
-	af = loglist_append(&db->loglist, key, key_sz, value, value_sz, FLAG_SET);
+	af = loglist_append(db->loglist, key, key_sz, value, value_sz, FLAG_SET);
 	
-	tree_add(&db->tree, key, key_sz, af.logno,
+	tree_add(db->tree, key, key_sz, af.logno,
 				af.value_offset, value_sz, af.record_offset);
 	return 1;
 }
@@ -285,19 +263,19 @@ int ydb_del(YDB ydb, char *key, unsigned short key_sz) {
 	
 	DB_LOCK(db);
 	struct append_info af;
-	af = loglist_append(&db->loglist, key, key_sz, NULL, 0, FLAG_DELETE);
-	tree_del(&db->tree, key, key_sz, af.logno, af.record_offset);
+	af = loglist_append(db->loglist, key, key_sz, NULL, 0, FLAG_DELETE);
+	tree_del(db->tree, key, key_sz, af.logno, af.record_offset);
 	DB_UNLOCK(db);
 	return(-1);
 }
 
 int ydb_get(YDB ydb, char *key, unsigned short key_sz,
-	    char *buf, unsigned int buf_sz) {
+	    char *buf, int buf_sz) {
 	struct db *db = (struct db *) ydb;
 	assert(db->magic == YDB_STRUCT_MAGIC);
 	
 	DB_LOCK(db);
-	struct item *item = tree_get(&db->tree, key, key_sz);
+	struct item *item = tree_get(db->tree, key, key_sz);
 	if(item == NULL)
 		goto error;
 		
@@ -307,7 +285,7 @@ int ydb_get(YDB ydb, char *key, unsigned short key_sz,
 		goto error;
 	}
 	
-	int r = loglist_get(&db->loglist, item->logno, item->value_offset, item->value_sz, buf, buf_sz);
+	int r = loglist_get(db->loglist, item->logno, item->value_offset, item->value_sz, buf, buf_sz);
 	if(r < 0)
 		goto error;
 	
@@ -317,6 +295,17 @@ int ydb_get(YDB ydb, char *key, unsigned short key_sz,
 error:
 	DB_UNLOCK(db);
 	return(-1);
+}
+
+int ydb_get_keys(YDB ydb, char *key, unsigned short key_sz,
+		 char *buf, int buf_sz) {
+	struct db *db = (struct db *) ydb;
+	assert(db->magic == YDB_STRUCT_MAGIC);
+
+	DB_LOCK(db);
+	int r = tree_get_keys(db->tree, key, key_sz, buf, buf_sz);
+	DB_UNLOCK(db);
+	return(r);
 }
 
 static int item_cmp(const void *a, const void *b) {
@@ -346,7 +335,7 @@ void ydb_prefetch(YDB ydb, char **keys, unsigned short *key_szs, int items_count
 	for(i=0; i < items_counter; i++, keys++, key_szs++) {
 		char *key = *keys;
 		int key_sz = *key_szs;
-		struct item *item = tree_get(&db->tree, key, key_sz);
+		struct item *item = tree_get(db->tree, key, key_sz);
 		if(item) {
 			*items = item;
 			items++;
@@ -365,7 +354,7 @@ void ydb_prefetch(YDB ydb, char **keys, unsigned short *key_szs, int items_count
 	for(i=0; i < items_sz; i++, items++) {
 		struct item *item = *items;
 		
-		struct log *log = slot_get(&db->loglist, item->logno);
+		struct log *log = slot_get(db->loglist, item->logno);
 		
 		size_t read_size = ROUND_UP(item->value_sz, PADDING) + sizeof(struct ydb_value_record);
 		
@@ -373,12 +362,12 @@ void ydb_prefetch(YDB ydb, char **keys, unsigned short *key_szs, int items_count
 		if(fd == log->fd  &&  (offset + count + 4096) >= item->value_offset) {
 			count = (item->value_offset+read_size) - offset;
 		}else{
-			if(fd != -1) {
-				posix_fadvise(fd, offset, count, POSIX_FADV_WILLNEED);
-			}
 			if(fd != log->fd) {
 				/* clear previous fadvices */
-				posix_fadvise(log->fd, 0, 0, POSIX_FADV_NORMAL);
+				posix_fadvise(log->fd, 0, 0, POSIX_FADV_RANDOM);
+			}
+			if(fd != -1) {
+				posix_fadvise(fd, offset, count, POSIX_FADV_WILLNEED);
 			}
 			fd = log->fd;
 			count = read_size;
@@ -391,3 +380,12 @@ void ydb_prefetch(YDB ydb, char **keys, unsigned short *key_szs, int items_count
 	
 	free(items_start);
 }
+
+int db_save_index(struct db *db) {
+	int curr_logno = db->loglist->write_logno;
+
+	int r = tree_save_index(db->tree, curr_logno);
+	db_unlink_old_logs(db, curr_logno);
+	return(r);
+}
+

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <glob.h>
 
 // open
 #include <sys/types.h>
@@ -17,6 +18,9 @@
 // mmap
 #include <sys/mman.h>
 
+
+#define DATA_FNAME "index"
+#define DATA_EXT ".idx"
 
 
 #ifndef O_LARGEFILE
@@ -61,22 +65,18 @@ ulong refcnt_get(struct tree *tree, int logno) {
 	return (ulong)rarr_get(tree->refcnt, logno);
 }
 
-int tree_open(struct tree *tree, char *fname, int *last_record_logno, u64 *last_record_offset, int flags) {
-	char buf[256];
-	
-	tree->fname = strdup(fname);
+int tree_open(struct tree *tree, struct db *db, int logno, char *top_dir, int *last_record_logno, u64 *last_record_offset, int flags) {
+	tree->db = db;
+	tree->top_dir = strdup(top_dir);
 	tree->refcnt = rarr_new();
-
-	snprintf(buf, sizeof(buf), "%s.old", fname);
-	tree->fname_old = strdup(buf);
-	snprintf(buf, sizeof(buf), "%s.new", fname);
-	tree->fname_new = strdup(buf);
 
 	tree->root = RB_ROOT;
 	tree->keys_stddev = stddev_new();
 	tree->values_stddev = stddev_new();
 	
-	return tree_load_index(tree, last_record_logno, last_record_offset, flags);
+	if(logno >= 0)
+		return tree_load_index(tree, logno, last_record_logno, last_record_offset, flags);
+	return(0);
 }
 
 void tree_close(struct tree *tree) {
@@ -94,9 +94,7 @@ void tree_close(struct tree *tree) {
 	assert(tree->value_bytes == 0);
 	
 	rarr_free(tree->refcnt);
-	free(tree->fname);
-	free(tree->fname_old);
-	free(tree->fname_new);
+	free(tree->top_dir);
 	stddev_free(tree->keys_stddev);
 	stddev_free(tree->values_stddev);
 }
@@ -121,6 +119,15 @@ struct item *tree_get(struct tree *tree, char *key, u16 key_sz) {
 	return NULL;
 }
 
+static struct item *tree_get_next(struct tree *tree, char *key, u16 key_sz) {
+	// TODO: implement properly!!! this is a dirty hack
+	struct item *item = tree_get(tree, key, key_sz);
+	if(!item)
+		return NULL;
+	struct rb_node *right = rb_next(&item->node);
+	
+	return container_of(right, struct item, node);
+}
 
 static int item_insert(struct tree *tree, struct item *data) {
 	struct rb_node **new = &(tree->root.rb_node), *parent = NULL;
@@ -218,12 +225,22 @@ int tree_del(struct tree *tree, char *key, u16 key_sz, int logno, u64 record_off
 	return(0);
 }
 
+char *tree_filename(char *buf, int buf_sz, char *top_dir, int logno) {
+	snprintf(buf, buf_sz, "%s%s%s%04X%s",
+			top_dir, PATH_DELIMITER, DATA_FNAME, logno, DATA_EXT);
+	return buf;
+}
+
 
 /*
 Dump index tree to the disk. This is pretty important so we can afford flush().
 */
-int tree_save_index(struct tree *tree) {
-	log_info("Saving to index %s", tree->fname);
+int tree_save_index(struct tree *tree, int logno) {
+	char fname_tmp[256], fname[256];
+	tree_filename(fname, sizeof(fname), tree->top_dir, logno);
+	snprintf(fname_tmp, sizeof(fname_tmp), "%s.new", fname);
+	
+	log_info("Saving index to %s", fname);
 	/* we're overcommiting by a factor of sizeof(struct ydb_key_record) and padding*/
 	u64 file_size =  sizeof(struct index_header) \
 		  + sizeof(struct index_item) * tree->key_counter \
@@ -231,7 +248,7 @@ int tree_save_index(struct tree *tree) {
 		  + tree->key_bytes;
 	
 	/* we delete the previous contents! */
-	int fd = open(tree->fname_new,  O_RDWR|O_TRUNC|O_CREAT|O_LARGEFILE, S_IRUSR|S_IWUSR);
+	int fd = open(fname_tmp,  O_RDWR|O_TRUNC|O_CREAT|O_LARGEFILE, S_IRUSR|S_IWUSR);
 	if(fd < 0) {
 		log_perror("open()");
 		return(-1);
@@ -293,11 +310,8 @@ int tree_save_index(struct tree *tree) {
 	}
 	/* no resources left to be closed */
 	
-	/* ignore errors */
-	unlink_with_history(tree->fname, tree->fname_old, 4);
-	
 	/* this is pretty important */
-	if(rename(tree->fname_new, tree->fname) < 0) {
+	if(rename(fname_tmp, fname) < 0) {
 		log_perror("rename()");
 		return(-1);
 	}
@@ -311,12 +325,57 @@ error_close:
 	return(-1);
 }
 
+struct PACKED key_item {
+	u_int64_t i_cas;
+	u_int8_t key_sz;
+	char key[];
+};
 
-int tree_load_index(struct tree *tree, int *last_record_logno, u64 *last_record_offset, int flags) {
+int tree_get_keys(struct tree *tree, char *key, u16 key_sz, char *start_buf, int buf_sz) {
+	char *buf = start_buf;
+	char *buf_end = start_buf + buf_sz;
+	
+	struct rb_node *node;
+	if(0 == key_sz) {
+		node = rb_first(&tree->root);
+	} else {
+		struct item *item = tree_get_next(tree, key, key_sz);
+		if(NULL == item) {
+			return -1;
+		}
+		log_error("key not found");
+		node = &item->node;
+	}
+	while (node) {
+		struct item *item = container_of(node, struct item, node);
+		node = rb_next(node);
+		
+		int sz = sizeof(struct key_item) + item->key_sz;
+		if(buf_end - buf < sz) {
+			break;
+		}
+		
+		struct key_item *ki = (struct key_item *)buf;
+		*ki = (struct key_item) {
+			.i_cas = item->value_offset | (uint64_t)item->logno << 32,
+			.key_sz = item->key_sz
+			};
+		memcpy(ki->key, item->key, item->key_sz);
+		buf += sz;
+	}
+	return buf - start_buf;
+}
+
+
+
+int tree_load_index(struct tree *tree, int logno, int *last_record_logno, u64 *last_record_offset, int flags) {
+	char fname[256];
+	tree_filename(fname, sizeof(fname), tree->top_dir, logno);
+	
 	char *reason = "unknown";
-	log_info("Loading index %s", tree->fname);
+	log_info("Loading index %s", fname);
 
-	int fd = open(tree->fname, O_RDONLY|O_LARGEFILE|O_NOATIME);
+	int fd = open(fname, O_RDONLY|O_LARGEFILE|O_NOATIME);
 	if(fd < 0) {
 		/* don't shout */
 		if(flags & YDB_CREAT) return(-1);
@@ -385,6 +444,53 @@ error_unmap:
 		log_perror("munmap()");
 error_close:
 	close(fd);
-	log_error("Error loading index %s: %s, offet:%i", tree->fname, reason, buf-mmap_ptr);
+	log_error("Error loading index %s: %s, offet:%i", fname, reason, buf-mmap_ptr);
 	return(-1);
 }
+
+
+int logno_from_fname(char *fname, int prefix_len, int suffix_len);
+
+int tree_get_max_fileno(char *top_dir) {
+	glob_t globbuf;
+	globbuf.gl_offs = 1;
+	char glob_str[256];
+	char **off;
+	snprintf(glob_str, sizeof(glob_str), "%s%s%s*%s",
+				top_dir, PATH_DELIMITER, DATA_FNAME, DATA_EXT);
+	int prefix_len = strchr(glob_str, '*') - glob_str;
+	int suffix_len = strlen(DATA_EXT);
+	
+	int max_logno = -1;
+	glob(glob_str, 0, NULL, &globbuf);
+	for(off=globbuf.gl_pathv; off && *off; off++) {
+		int logno = logno_from_fname(*off, prefix_len, suffix_len);
+		max_logno = max_logno < logno ? max_logno: logno;
+	}
+	globfree(&globbuf);
+	return(max_logno);
+}
+
+
+/*
+int {
+	glob_t globbuf;
+	globbuf.gl_offs = 1;
+	char glob_str[256];
+	char **off;
+	int max_logno = -1;
+	snprintf(glob_str, sizeof(glob_str), "%s%s%s*%s",
+				top_dir, PATH_DELIMITER, DATA_FNAME, DATA_EXT);
+	int prefix_len = strchr(glob_str, '*') - glob_str;
+	int suffix_len = strlen(DATA_EXT);
+	
+	glob(glob_str, 0, NULL, &globbuf);
+	for(off=globbuf.gl_pathv; off && *off; off++) {
+		int logno = logno_from_fname(*off, prefix_len, suffix_len);
+		max_logno = MAX(max_logno, logno);
+	}
+	globfree(&globbuf);
+	
+	return(max_logno);
+}
+*/

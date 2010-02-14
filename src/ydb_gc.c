@@ -70,7 +70,7 @@ static int gc_item_move(struct db *db, char *key, u16 key_sz, int logno, u64 val
 #endif
 	
 	int ret = 0; /* not added */
-	struct item *item = tree_get(&db->tree, key, key_sz);
+	struct item *item = tree_get(db->tree, key, key_sz);
 	if(item == NULL) /* already deleted */
 		goto release;
 	
@@ -78,7 +78,7 @@ static int gc_item_move(struct db *db, char *key, u16 key_sz, int logno, u64 val
 		goto release;
 	/* not detelted, not updated. we need to move it */
 	// 1. get the value
-	int value_sz = loglist_get(&db->loglist, item->logno, item->value_offset, item->value_sz, value, sizeof(value));
+	int value_sz = loglist_get(db->loglist, item->logno, item->value_offset, item->value_sz, value, sizeof(value));
 	if(value_sz < 0)
 		goto release;
 	// 2. set the same value
@@ -117,9 +117,12 @@ void *gc_run_thread(void *vdb) {
 	struct timespec a, b;
 	log_info("Starting GC thread");
 	
-	int fd = open(db->tree.fname, O_RDONLY|O_LARGEFILE|O_NOATIME);
+	char buf[256];
+	char *fname = tree_filename(buf, sizeof(buf), db->tree->top_dir, db->loglist->write_logno);
+	
+	int fd = open(fname, O_RDONLY|O_LARGEFILE|O_NOATIME);
 	if(fd < 0) {
-		log_info("GC thread stopped. No index file found %s", db->tree.fname);
+		log_info("GC thread stopped. No index file found %s", fname);
 		/* Index file can legally not exist, just go on. */
 		goto error_unlock;
 	}
@@ -140,9 +143,9 @@ void *gc_run_thread(void *vdb) {
 
 	int ocr = db->overcommit_ratio;
 	u64 allowed_bytes = USED_BYTES(db) * ((ocr-1)/2 + 1);
-	s64 to_free_bytes = db->loglist.total_bytes - allowed_bytes;
+	s64 to_free_bytes = db->loglist->total_bytes - allowed_bytes;
 	s64 freed_bytes = 0;
-	log_info("GC: allowed_bytes:%lli used_bytes:%lli to_free_bytes:%lli", allowed_bytes, db->loglist.total_bytes, to_free_bytes);
+	log_info("GC: allowed_bytes:%lli used_bytes:%lli to_free_bytes:%lli", allowed_bytes, db->loglist->total_bytes, to_free_bytes);
 
 
 #ifndef NO_THREADS
@@ -207,7 +210,7 @@ void *gc_run_thread(void *vdb) {
 				break;
 		}
 	}
-	log_info("GC: allowed_bytes:%lli used_bytes:%lli to_free_bytes:%lli", allowed_bytes, db->loglist.total_bytes, to_free_bytes);
+	log_info("GC: allowed_bytes:%lli used_bytes:%lli to_free_bytes:%lli", allowed_bytes, db->loglist->total_bytes, to_free_bytes);
 
 
 	if(munmap(mmap_ptr, file_size) < 0)

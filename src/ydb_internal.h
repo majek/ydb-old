@@ -71,11 +71,13 @@ int rarr_get_filled_items(r_arr v);
 #define FLAG_DELETE 0x01
 #define FLAG_NOVALUE (FLAG_DELETE)
 
+struct db;
+
 /* **** **** */
 struct tree {
-	char *fname;		/* Base name of index file. */
-	char *fname_new;	/* Name of new index file, *.new */
-	char *fname_old;	/* Name of previous index, *.old */
+	struct db *db;
+	
+	char *top_dir;		/* Base name of index file. */
 	struct rb_root root;
 	
 	int commited_last_record_logno;
@@ -117,8 +119,10 @@ struct index_item{
 	char	key[];
 };
 
-int tree_load_index(struct tree *tree, int *last_record_logno, u64 *last_record_offset, int flags);
-int tree_save_index(struct tree *tree);
+int tree_load_index(struct tree *tree, int logno, int *last_record_logno, u64 *last_record_offset, int flags);
+int tree_save_index(struct tree *tree, int logno);
+char *tree_filename(char *buf, int buf_sz, char *top_dir, int logno);
+int tree_get_keys(struct tree *tree, char *key, u16 key_sz, char *start_buf, int buf_sz);
 
 
 #ifndef PACKED
@@ -144,8 +148,9 @@ struct tree_sig{
 	int logno;
 	u64 record_offset;
 };
-int tree_open(struct tree *tree, char *fname, int *last_record_logno, u64 *last_record_offset, int flags);
+int tree_open(struct tree *tree, struct db *db, int logno, char *top_dir, int *last_record_logno, u64 *last_record_offset, int flags);
 void tree_close(struct tree *tree);
+int tree_get_max_fileno(char *top_dir);
 
 unsigned long refcnt_get(struct tree *tree, int logno);
 
@@ -153,6 +158,8 @@ unsigned long refcnt_get(struct tree *tree, int logno);
 
 /* **** **** */
 struct loglist {
+	struct db *db;
+	
 	r_arr logs;
 	char *top_dir;
 	char *unlink_base;
@@ -166,7 +173,7 @@ struct loglist {
 	u64 appended_bytes;
 };
 
-int loglist_open(struct loglist *llist, char *top_dir, u64 min_log_size, int max_descriptors);
+int loglist_open(struct loglist *llist, struct db *db, char *top_dir, u64 min_log_size, int max_descriptors);
 void loglist_close(struct loglist *llist);
 int loglist_get(struct loglist *llist, int logno, u64 value_offset, u64 value_size, char *dst, u32 dst_sz);
 void loglist_sync(struct loglist *llist);
@@ -214,8 +221,8 @@ struct db {
 	u32	magic;
 	char	*top_dir;
 
-	struct tree	tree;
-	struct loglist	loglist;
+	struct tree	*tree;
+	struct loglist	*loglist;
 
 	int overcommit_ratio;
 	int flags;
@@ -236,13 +243,13 @@ void print_stats(struct db *db);
 
 
 #define USED_BYTES(db)	\
-	(db->tree.key_bytes + db->tree.value_bytes)
+	(db->tree->key_bytes + db->tree->value_bytes)
 
 /* TODO: two adds instead of one */
 #define DOUBLE_RATIO(db, default)	\
-	(USED_BYTES(db) ? ((double)db->loglist.total_bytes / (double)USED_BYTES(db)) : default)
+	(USED_BYTES(db) ? ((double)db->loglist->total_bytes / (double)USED_BYTES(db)) : default)
 #define INT_RATIO(db, default)	\
-	(USED_BYTES(db) ? (db->loglist.total_bytes / USED_BYTES(db)) : default)
+	(USED_BYTES(db) ? (db->loglist->total_bytes / USED_BYTES(db)) : default)
 
 
 
@@ -307,6 +314,10 @@ u_int64_t buf_writer_free(BUFFER b);
 BUFFER buf_reader_from_fd(int fd);
 char *buf_read(BUFFER b, int sz);
 u_int64_t buf_reader_free(BUFFER b);
+
+
+/* **** ydb_db.c **** */
+int db_save_index(struct db *db);
 
 
 /* **** Premature optimization is the root of all evil... **** */

@@ -1,4 +1,6 @@
 TODO:
+ * index is never saved
+ *
 
  * Stack is limited to 8MB...
  * Fails to dump tree when it's more than 2GB on 32bit machine = due to mmap

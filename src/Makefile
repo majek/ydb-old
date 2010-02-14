@@ -24,7 +24,13 @@ PROF_LFLAGS=$(L_FLAGS) -pg
 libydb.so: build-rel/libydb.so
 	cp build-rel/libydb.so .
 
-all: libydb.so build-cov/libydb.so build-prof/libydb.so
+libydb.a: build-rel/libydb.a
+	cp build-rel/libydb.a .
+
+all: libydb.so libydb.a build-cov/libydb.so build-prof/libydb.so
+
+build-rel/libydb.a: $(patsubst %.o,build-rel/%.o,$(O_FILES))
+	ar r $@ $^
 
 build-rel/libydb.so: $(patsubst %.o,build-rel/%.o,$(O_FILES))
 	$(CC) $(REL_LFLAGS) -o $@ $^
