@@ -35,7 +35,7 @@ int ydb_get(YDB ydb, char *key, unsigned short key_sz,
 
 void ydb_prefetch(YDB ydb, char **keys, unsigned short *key_szs, int items_counter);
 
-int ydb_get_keys(YDB ydb, char *key, unsigned short key_sz, 
+int ydb_get_keys(YDB ydb, char *key, unsigned short key_sz,
 		 char *buf, int buf_sz);
 
 #endif

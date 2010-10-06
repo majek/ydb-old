@@ -465,7 +465,7 @@ int tree_get_max_fileno(char *top_dir) {
 	glob(glob_str, 0, NULL, &globbuf);
 	for(off=globbuf.gl_pathv; off && *off; off++) {
 		int logno = logno_from_fname(*off, prefix_len, suffix_len);
-		max_logno = max_logno < logno ? max_logno: logno;
+		max_logno = max_logno > logno ? max_logno: logno;
 	}
 	globfree(&globbuf);
 	return(max_logno);

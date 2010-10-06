@@ -217,25 +217,6 @@ int ydb_add(YDB ydb, char *key, unsigned short key_sz,
 		goto release;
 	}
 	
-	/* overcommit threshold is reached, clear old stuff than gc. */
-	if(db->gc_running == 0 && 
-	   (DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio)) {
-		if(DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio) {
-			struct timespec a;
-			clock_gettime(CLOCK_MONOTONIC, &a);
-			/* no more often than once 30 seconds */
-			if(TIMESPEC_SUBTRACT(a, db->gc_spawned)/1000000 > 30*1000) {
-				print_stats(db);
-				db->gc_spawned = a;
-				db_unlink_old_logs(db, db->loglist->write_logno);
-				log_info("Starting GC %.2f/%i",
-						DOUBLE_RATIO(db, 999.0),
-						db->overcommit_ratio);
-				gc_spawn(db);
-			}
-		}
-	}
-	
 	if(db->gc_finished) {
 		gc_join(db);
 	}
@@ -386,6 +367,25 @@ int db_save_index(struct db *db) {
 
 	int r = tree_save_index(db->tree, curr_logno);
 	db_unlink_old_logs(db, curr_logno);
+	
+	/* overcommit threshold is reached, clear old stuff than gc. */
+	if(db->gc_running == 0 && 
+	   (DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio)) {
+		if(DOUBLE_RATIO(db, 999.0) > (double)db->overcommit_ratio) {
+			struct timespec a;
+			clock_gettime(CLOCK_MONOTONIC, &a);
+			/* no more often than once 30 seconds */
+			if(TIMESPEC_SUBTRACT(a, db->gc_spawned)/1000000 > 30*1000) {
+				print_stats(db);
+				db->gc_spawned = a;
+				db_unlink_old_logs(db, db->loglist->write_logno);
+				log_info("Starting GC %.2f/%i",
+						DOUBLE_RATIO(db, 999.0),
+						db->overcommit_ratio);
+				gc_spawn(db);
+			}
+		}
+	}
 	return(r);
 }
 
